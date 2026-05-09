@@ -1,0 +1,45 @@
+[project]
+name = "nnd"
+version = "0.1.0"
+description = "Add your description here"
+readme = "readme.md"
+requires-python = "==3.10.*"
+
+
+dependencies = [
+    # Core
+    "transformers==4.43.2",
+    "trl==0.9.6",
+    "accelerate",
+    "deepspeed",
+
+    # Training / Finetuning
+    "peft==0.9.0",
+    "bitsandbytes>=0.43.0",
+    "datasets>=2.18.0",
+    "evaluate==0.4.0",
+    "safetensors>=0.3.3",
+    "sentencepiece>=0.1.99",
+    "einops>=0.6.1",
+
+    "packaging>=23.0",
+    "tqdm>=4.64.1",
+
+    # NLP
+    "nltk",
+    "numerize",
+
+    # Dev tools
+    "black>=24.4.2",
+    "flake8>=6.0.0",
+    "isort>=5.12.0",
+    "pytest",
+    "parameterized>=0.9.0",
+    "rich"
+]
+
+
+[tool.uv]
+index-url = "https://pypi.org/simple"
+extra-index-url = ["https://download.pytorch.org/whl/cu126"]
+index-strategy = "unsafe-best-match"
