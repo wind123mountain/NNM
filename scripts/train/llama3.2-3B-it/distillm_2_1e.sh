@@ -1,7 +1,6 @@
 #!/bin/bash
 
 
-
 # --- Accelerate launch ---
 accelerate launch \
   --config_file accelerate_configs/multi_gpu.yaml \
