@@ -43,6 +43,10 @@ from alignment import (
 )
 from trl import SFTTrainer, SFTConfig, setup_chat_format
 
+from datasets import disable_caching
+
+disable_caching()
+
 
 logger = logging.getLogger(__name__)
 
@@ -138,9 +142,9 @@ def main():
             "task": "sft",
             "auto_insert_empty_system_msg": data_args.auto_insert_empty_system_msg,
         },
-        num_proc=data_args.preprocessing_num_workers,
         remove_columns=column_names,
         desc="Applying chat template",
+        load_from_cache_file=False,
     )
 
     # ##########################

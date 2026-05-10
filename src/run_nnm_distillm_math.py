@@ -41,6 +41,10 @@ from alignment import (
 from peft import PeftConfig, PeftModel
 from distillm_nnm_trainer import DistiLLMTrainer
 
+from datasets import disable_caching
+
+disable_caching()
+
 logger = logging.getLogger(__name__)
 
 
@@ -106,9 +110,9 @@ def main():
             "task": "dpo",
             "auto_insert_empty_system_msg": data_args.auto_insert_empty_system_msg,
         },
-        num_proc=data_args.preprocessing_num_workers,
         remove_columns=column_names,
         desc="Formatting comparisons with prompt template",
+        load_from_cache_file=False,
     )
 
     # ##########################
