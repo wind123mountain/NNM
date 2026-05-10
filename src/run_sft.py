@@ -157,7 +157,7 @@ def main():
     eval_dataset = raw_datasets["train"].select(range(10))
     print("train_dataset:", len(raw_datasets["train"]))
 
-    with training_args.main_process_first(desc="Log a few random samples from the processed training set"):
+    if training_args.local_rank in [-1, 0]:
         for index in random.sample(range(len(raw_datasets["train"])), 3):
             logger.info(f"Sample {index} of the processed training set:\n\n{raw_datasets['train'][index]['text']}")
 
