@@ -16,7 +16,7 @@ mkdir -p outputs/logs
 # bash ./scripts/train/qwen2.5-0.5B/distillm_2.sh 2>&1 | tee outputs/logs/distillm_2_qwen2.5_0.5b.log
 # bash ./scripts/train/qwen2.5-0.5B/distillm_2_1e.sh 2>&1 | tee outputs/logs/distillm_2_qwen2.5_0.5b-1e.log
 
-if [ ! -f ".venv/bin/activate" ]; then
+if [ ! -d "data/reformatted/distill-deepSeek-R1-Distill-Llama-8B" ]; then
     bash ./scripts/train/llama3.2-3B-it/reformat_data.sh
 fi
 CUDA_VISIBLE_DEVICES=0,1 bash ./scripts/train/llama3.2-3B-it/sft.sh 2>&1 | tee outputs/logs/llama3.2_3b_it_sft.log &
