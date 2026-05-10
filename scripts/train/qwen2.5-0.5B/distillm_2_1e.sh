@@ -8,4 +8,4 @@ accelerate launch \
   --config_file accelerate_configs/multi_gpu.yaml \
   --num_processes=2 \
   src/run_distillm_math.py \
-  ./training_configs/qwen2.5-0.5B/qwen2.5-math-distillm2.yaml
+  ./training_configs/qwen2.5-0.5B/distillm2-1epoch.yaml
