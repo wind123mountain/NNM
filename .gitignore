@@ -177,4 +177,4 @@ outputs/
 results/
 cache-*
 uv.lock
-data/reformatted
+data/
