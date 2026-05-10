@@ -21,4 +21,9 @@ bash ./scripts/train/qwen2.5-0.5B/distillm_2_1e.sh 2>&1 | tee outputs/logs/disti
 # bash ./scripts/train/llama3.2-3B-it/distillm_2.sh 2>&1 | tee outputs/logs/llama3.2_3b_it_distillm_2.log
 # bash ./scripts/train/llama3.2-3B-it/distillm_2_1e.sh 2>&1 | tee outputs/logs/llama3.2_3b_it_distillm_2_1e.log
 
+bash ./scripts/train/qwen2.5-1.5B-it/reformat_data.sh
+bash ./scripts/train/qwen2.5-1.5B-it/sft.sh 2>&1 | tee outputs/logs/sft_qwen2.5_1.5b_it.log
+bash ./scripts/train/qwen2.5-1.5B-it/distillm_2.sh 2>&1 | tee outputs/logs/distillm_2_qwen2.5_1.5b_it.log
+bash ./scripts/train/qwen2.5-1.5B-it/distillm_2_1e.sh 2>&1 | tee outputs/logs/distillm_2_qwen2.5_1.5b_1e.log
+
 bash /media/volume/ElasticVol/LLM_Distillation/test.sh
