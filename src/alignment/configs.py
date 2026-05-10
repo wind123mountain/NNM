@@ -267,7 +267,6 @@ class DPOConfig(trl.DPOConfig):
     """
     Arguments related to the DPO training process itself. For all parameters, see: https://huggingface.co/docs/transformers/v4.39.3/en/main_classes/trainer#transformers.TrainingArguments
     """
-
     hub_model_revision: Optional[str] = field(
         default="main",
         metadata={"help": ("The Hub model branch to push the model to.")},
@@ -276,7 +275,6 @@ class DPOConfig(trl.DPOConfig):
         default=True,
         metadata={"help": ("Whether to log and evaluate the first global_step or not.")},
     )
-
     teacher_layer_mapping: List[int] = field(default=list)
     student_layer_mapping: List[int] = field(default=list)
     split_layer_mapping: List[int] = field(default=list)
@@ -285,6 +283,19 @@ class DPOConfig(trl.DPOConfig):
     proj_lr: Optional[float] = field(default=-1.0)
     use_dsa: bool = field(default=False)
     use_hs: bool = field(default=False)
-    
     optim: Optional[str] = field(default="rmsprop")
     remove_unused_columns: bool = field(default=False)
+
+    # ═══ NNM fields ═══
+    nnm_lambda: float = field(default=0)
+    nnm_K_centroids: int = field(default=128)
+    nnm_d_prime: int = field(default=256)
+    nnm_ns_iters: int = field(default=5)
+    nnm_warmup: int = field(default=100)
+    nnm_n_mid_layers: int = field(default=4)
+    nnm_chosen_weight: float = field(default=1.0)
+    nnm_rejected_weight: float = field(default=0.5)
+    nnm_centroid_batches: int = field(default=500)
+    nnm_student_layer_mapping: Optional[List[int]] = field(default=None)
+    nnm_teacher_layer_mapping: Optional[List[int]] = field(default=None)
+    nnm_target: str = field(default="chosen")

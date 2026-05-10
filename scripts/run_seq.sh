@@ -1,33 +1,19 @@
-# echo "start"
+GPUS=(0 1)
+export CUDA_VISIBLE_DEVICES=$(IFS=,; echo "${GPUS[*]}")
+N_GPUS=${#GPUS[@]}
 
-# bash scripts/gpt2/distillm_2_gpt2_0.1b.sh > outputs/gpt2-0.1b-distillm2-train.log 2>&1
-# echo "done gpt2 distillm"
+mkdir -p outputs/logs
+# mkdir -p /media/volume/ElasticVol/hf_cache
+# export HF_HOME=/media/volume/ElasticVol/hf_cache
+# export HUGGINGFACE_HUB_CACHE=/media/volume/ElasticVol/hf_cache
+# export TRANSFORMERS_CACHE=/media/volume/ElasticVol/hf_cache
+# export HF_DATASETS_CACHE=/media/volume/ElasticVol/hf_cache
 
+# bash ./scripts/gen_traces/gen_all.sh $N_GPUS
 
-# bash scripts/gpt2/span_distillm_2_gpt2_0.1b.sh > outputs/span-gpt2-0.1b-distillm2-train.log 2>&1
-# echo "done gpt2 span distillm"
-# bash ./scripts/distillm2/eval_span_gpt2_0.1B.sh
+# bash ./scripts/train/qwen2.5-0.5B/reformat_data.sh
+bash ./scripts/train/qwen2.5-0.5B/sft_qwen2.5_0.5b.sh 2>&1 | tee outputs/logs/sft_qwen2.5_0.5b.log
+bash ./scripts/train/qwen2.5-0.5B/distillm_2_qwen2.5_0.5b.sh 2>&1 | tee outputs/logs/distillm_2_qwen2.5_0.5b.log
+bash ./scripts/train/qwen2.5-0.5B/distillm_2_qwen2.5_0.5b-1e.sh 2>&1 | tee outputs/logs/distillm_2_qwen2.5_0.5b-1e.log
 
-
-# bash scripts/qwen1.5/distillm_2_qwen1.5_0.5b.sh > outputs/qwen1.5-0.5b-distillm2-train.log 2>&1
-# echo "done qwen1.5 distillm"
-
-# bash scripts/qwen1.5/span_distillm_2_qwen1.5_0.5b.sh > outputs/span-qwen1.5-0.5b-distillm2-train.log 2>&1
-# echo "done qwen1.5 span distillm"
-# bash ./scripts/distillm2/eval_span_qwen1.5_0.5B.sh
-
-# # bash ./scripts/gen/eval_opt_1.3b.sh
-# # bash ./scripts/gen/eval_opt_6.7b.sh
-
-# bash ./scripts/opt/reformat_data.sh
-
-# bash scripts/opt/distillm_2_opt_1.3b.sh > outputs/distillm_2_opt_1.3b.log 2>&1
-# echo "done opt distillm"
-# bash ./scripts/distillm2/eval_opt_1.3B.sh
-
-# bash scripts/opt/span_distillm_2_opt_1.3b.sh > outputs/span_distillm_2_opt_1.3b.log 2>&1
-# echo "done opt span distillm"
-# bash ./scripts/distillm2/eval_span_opt_1.3B.sh
-
-
-# echo "done"
+bash /media/volume/ElasticVol/LLM_Distillation/test.sh

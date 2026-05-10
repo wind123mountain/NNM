@@ -15,12 +15,10 @@ def main(args):
 
     for chosen_raw, rejected_raw in zip(train_teacher_data, train_student_data):
         chosen = [
-            {"role": "system", "content": "Put your final answer within \\boxed{}."},
             {"content": chosen_raw['prompt'], "role": "user"},
             {"content": chosen_raw['generated_text'], "role": "assistant"}
         ]
         rejected = [
-            {"role": "system", "content": "Put your final answer within \\boxed{}."},
             {"content": rejected_raw['prompt'], "role": "user"},
             {"content": rejected_raw['generated_text'], "role": "assistant"}
         ]

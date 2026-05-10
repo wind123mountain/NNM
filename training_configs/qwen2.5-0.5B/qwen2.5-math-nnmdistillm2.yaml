@@ -52,3 +52,4 @@ nnm_chosen_weight: 1.0
 nnm_rejected_weight: 1.0
 nnm_centroid_batches: 3000
 nnm_target: "concatenated"   # "chosen" | "concatenated" | "both"
+save_safetensors: false

@@ -1,0 +1,17 @@
+#!/bin/bash
+TP_SIZE=${1:-2}
+
+MODEL_PATH="deepseek-ai/DeepSeek-R1-Distill-Llama-8B"
+OUTPUT_DIR="data/dpo/deepseek-ai/DeepSeek-R1-Distill-Llama-8B"
+OUTPUT_FILE="generated_train.jsonl"
+
+echo "Start gen traces..."
+echo "Model: $MODEL_PATH"
+
+python ./generate/generate_vllm.py \
+    --model_path $MODEL_PATH \
+    --output_dir $OUTPUT_DIR \
+    --output_file $OUTPUT_FILE \
+    --num_gpus $TP_SIZE
+
+echo "Done!"

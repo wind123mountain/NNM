@@ -41,7 +41,7 @@ from alignment import (
     get_quantization_config,
     get_tokenizer,
 )
-from trl import SFTTrainer, setup_chat_format
+from trl import SFTTrainer, SFTConfig, setup_chat_format
 
 
 logger = logging.getLogger(__name__)
