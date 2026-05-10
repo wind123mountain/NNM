@@ -1,4 +1,7 @@
-uv venv --seed
+if [ ! -f ".venv/bin/activate" ]; then
+    uv venv --seed
+fi
+
 source .venv/bin/activate
 pip install torch==2.5.1 --index-url https://download.pytorch.org/whl/cu124
 deactivate
