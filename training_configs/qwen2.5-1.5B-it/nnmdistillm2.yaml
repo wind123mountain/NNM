@@ -16,7 +16,7 @@ preprocessing_num_workers: 12
 bf16: true
 do_eval: true
 eval_steps: 10000000
-gradient_accumulation_steps: 8
+gradient_accumulation_steps: 16
 hub_model_id: qwen
 learning_rate: 5.0e-5
 log_level: info

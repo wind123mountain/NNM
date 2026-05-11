@@ -61,7 +61,7 @@ lm_eval "${COMMON_ARGS[@]}" \
 # ============================================================
 echo ">>> MATH (Minerva 4-shot)"
 lm_eval "${COMMON_ARGS[@]}" \
-    --tasks minerva_math \
+    --tasks minerva_math500 \
     --num_fewshot 4
 
 # ============================================================
