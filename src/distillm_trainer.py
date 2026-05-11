@@ -240,7 +240,7 @@ class DistiLLMTrainer(Trainer):
         # has been called in order to properly call autocast if needed.
         self._peft_has_been_casted_to_bf16 = False
 
-        model.resize_token_embeddings(self.ref_model.config.vocab_size)
+        model.resize_token_embeddings(ref_model.config.vocab_size)
 
         if force_use_ref_model:
             warnings.warn(
