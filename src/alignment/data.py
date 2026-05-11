@@ -225,7 +225,7 @@ def mix_datasets(
                 try:
                     dataset = load_from_disk(ds)
                 except Exception as e:
-                    dataset = load_dataset(ds, ds_config, split=split)
+                    dataset = load_dataset(ds, split=split, data_dir=ds_config) if ds_config and "/" in str(ds_config) else load_dataset(ds, ds_config, split=split)
 
             # Remove redundant columns to avoid schema conflicts on load
             dataset = dataset.remove_columns([col for col in dataset.column_names if col not in columns_to_keep])
