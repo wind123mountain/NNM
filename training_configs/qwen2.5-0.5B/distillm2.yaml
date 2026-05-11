@@ -5,8 +5,8 @@ torch_dtype: bfloat16
 attn_implementation: sdpa
 
 # Data training arguments
-dataset_mixer:
-  data/reformatted/distill-qwen2.5-Math-1.5B-Instruct: 1.0
+dataset_mixer:data/reformatted/distill-qwen2.5-Math-1.5B-Instruct
+  : 1.0
 dataset_splits:
 - train
 - test

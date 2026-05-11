@@ -597,6 +597,8 @@ class DistiLLMTrainer(Trainer):
                     self.tokenize_row, num_proc=self.dataset_num_proc, 
                     writer_batch_size=10, load_from_cache_file=False
                 )
+        # projectors có thể không dùng trong warmup steps
+        args.ddp_find_unused_parameters = True
         super().__init__(
             model=model,
             args=args,
@@ -610,6 +612,8 @@ class DistiLLMTrainer(Trainer):
             optimizers=optimizers,
             preprocess_logits_for_metrics=preprocess_logits_for_metrics,
         )
+
+
 
         # Add tags for models that have been loaded with the correct transformers version
         if hasattr(self.model, "add_model_tags"):
@@ -685,8 +689,8 @@ class DistiLLMTrainer(Trainer):
             nn.Linear(d_s, d_t, bias=True).to(model.device)
             for _ in self.nnm_s_layers
         ])
-        # Attach to model so optimizer picks up parameters
-        model.projectors = projector_list
+        # Lưu projectors riêng, KHÔNG attach vào DDP model
+        self.projectors = projector_list.to(model.device)
 
         # Pre-compute teacher centroids (1-time)
         if self.nnm_lambda > 0 and not getattr(self, "_nnm_centroids_built", False):
@@ -708,6 +712,18 @@ class DistiLLMTrainer(Trainer):
         else:
             self._nnm_centroids = None
             self._nnm_R = None
+
+
+    def create_optimizer(self):
+        super().create_optimizer()
+        # Thêm projectors vào optimizer
+        proj_lr = getattr(self.args, 'proj_lr', -1.0)
+        lr = proj_lr if proj_lr > 0 else self.args.learning_rate
+        self.optimizer.add_param_group({
+            'params': list(self.projectors.parameters()),
+            'lr': lr,
+        })
+        return self.optimizer
 
     def _prepare_deepspeed(self, model: PreTrainedModelWrapper):
         # Adapted from accelerate: https://github.com/huggingface/accelerate/blob/739b135f8367becb67ffaada12fe76e3aa60fefd/src/accelerate/accelerator.py#L1473
@@ -1441,15 +1457,18 @@ class DistiLLMTrainer(Trainer):
         else:
             rejected_pos_kl = tea_pos_kl[len_chosen:]
 # ═══ NNM loss ═══
-        nnm_loss = torch.tensor(0.0, device=self.accelerator.device)
+        # Dummy để projectors không bị unused khi warmup
+        dummy = sum(p.sum() * 0 for p in self.projectors.parameters())
+        nnm_loss = dummy
         if need_hiddens:
             step = self.state.global_step if hasattr(self, 'state') and self.state is not None else 0
             warmup_factor = min(1.0, step / max(1, self.nnm_warmup))
             nnm_lam = self.nnm_lambda * warmup_factor
 
             if nnm_lam > 0:
+                unwrapped = self.accelerator.unwrap_model(model)
                 nnm_loss = compute_nnm_loss(
-                    projectors=self.model.projectors,
+                    projectors=self.projectors,
                     s_hidden_states=student_outputs.hidden_states,
                     t_hidden_states=teacher_outputs.hidden_states,
                     labels=concatenated_batch["concatenated_labels"],
@@ -1465,6 +1484,10 @@ class DistiLLMTrainer(Trainer):
                     rejected_weight=self.nnm_rejected_w,
                 )
                 nnm_loss = nnm_lam * nnm_loss
+            else:
+        # Fix #3: dummy loss để projectors không bị "unused"
+                dummy = sum(p.sum() * 0 for p in self.projectors.parameters())
+                nnm_loss = dummy
         return chosen_logps, rejected_logps, tea_chosen_logps, tea_rejected_logps, chosen_pos_kl, rejected_pos_kl, nnm_loss
 
     def get_batch_loss_metrics(
@@ -1509,6 +1532,7 @@ class DistiLLMTrainer(Trainer):
         return_outputs=False,
         num_items_in_batch=None,
     ) -> Union[torch.Tensor, Tuple[torch.Tensor, Dict[str, torch.Tensor]]]:
+
         if not self.use_dpo_data_collator:
             warnings.warn(
                 "compute_loss is only implemented for DPODataCollatorWithPadding, and you passed a datacollator that is different than "

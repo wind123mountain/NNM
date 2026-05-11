@@ -6,4 +6,4 @@
 accelerate launch \
   --config_file accelerate_configs/multi_gpu.yaml \
   src/run_nnm_distillm_math.py \
-  training_configs/qwen2.5-math-nnmdistillm2.yaml
+  ./training_configs/llama3.2-3B-it/nnmdistillm2.yaml
