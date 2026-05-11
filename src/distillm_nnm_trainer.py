@@ -664,14 +664,8 @@ class DistiLLMTrainer(Trainer):
         # Layer mapping — auto-pick 40-85% if not provided
         L_s = model.config.num_hidden_layers
         L_t = self.ref_model.config.num_hidden_layers
-        self.nnm_s_layers = getattr(
-            args, "nnm_student_layer_mapping",
-            select_mid_layers(L_s, self.nnm_n_mid),
-        )
-        self.nnm_t_layers = getattr(
-            args, "nnm_teacher_layer_mapping",
-            select_mid_layers(L_t, self.nnm_n_mid),
-        )
+        self.nnm_s_layers = getattr(args, "nnm_student_layer_mapping", None) or select_mid_layers(L_s, self.nnm_n_mid)
+        self.nnm_t_layers = getattr(args, "nnm_teacher_layer_mapping", None) or select_mid_layers(L_t, self.nnm_n_mid)
         if len(self.nnm_s_layers) != len(self.nnm_t_layers):
             raise ValueError(
                 f"NNM student/teacher layer mapping length mismatch: "

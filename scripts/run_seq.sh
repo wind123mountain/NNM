@@ -1,6 +1,6 @@
-GPUS=(0 1)
-export CUDA_VISIBLE_DEVICES=$(IFS=,; echo "${GPUS[*]}")
-N_GPUS=${#GPUS[@]}
+# GPUS=(0 1)
+# export CUDA_VISIBLE_DEVICES=$(IFS=,; echo "${GPUS[*]}")
+N_GPUS=8
 
 mkdir -p outputs/logs
 # mkdir -p /media/volume/ElasticVol/hf_cache
@@ -10,11 +10,6 @@ mkdir -p outputs/logs
 # export HF_DATASETS_CACHE=/media/volume/ElasticVol/hf_cache
 
 # bash ./scripts/gen_traces/gen_all.sh $N_GPUS
-GPUS=(0 1)
-export CUDA_VISIBLE_DEVICES=$(IFS=,; echo "${GPUS[*]}")
-N_GPUS=${#GPUS[@]}
-
-mkdir -p outputs/logs
 
 
 if [ ! -d "data/reformatted/distill-qwen2.5-Math-1.5B-Instruct" ]; then

@@ -6,7 +6,7 @@ attn_implementation: sdpa
 
 # Data training arguments
 dataset_mixer:
-  data/reformatted/qwen_math: 1.0
+  data/reformatted/distill-qwen2.5-Math-1.5B-Instruct: 1.0
 dataset_splits:
 - train
 - test
