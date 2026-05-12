@@ -1,5 +1,6 @@
 conda create -n nnm python=3.10 -y
 conda init bash
+source ~/.bashrc
 conda activate nnm
 
 pip install uv
