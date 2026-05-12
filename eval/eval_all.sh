@@ -1,6 +1,10 @@
 #!/bin/bash
-# Chạy eval tất cả models trong VoCuc/nnm — dùng checkpoint cuối mỗi subfolder
-# Usage: bash run_eval_all.sh
+
+git clone --depth 1 https://github.com/EleutherAI/lm-evaluation-harness
+cd lm-evaluation-harness
+pip install -e ".[math,ifeval,sentencepiece]"
+pip install langdetect immutabledict   # cho IFEval
+cd ..
 
 # ============================================================
 # Config chung
