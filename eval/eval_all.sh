@@ -1,167 +1,125 @@
 #!/bin/bash
-# Chạy eval tất cả models trong VoCuc/nnm — dùng checkpoint cuối mỗi subfolder
-# Usage: bash run_eval_all.sh
+# eval_vllm.sh — đầy đủ 10 tasks, vLLM multi-GPU
+# Usage: bash eval_vllm.sh
 
 # ============================================================
-# Config chung
+# Config
 # ============================================================
-export CUDA_VISIBLE_DEVICES=1
+export CUDA_VISIBLE_DEVICES=0,1        # chọn GPU
+TP=2                                   # tensor_parallel = số GPU
 
-MODEL_NAME="VoCuc/nnm"
-DEVICE="cuda"
-DTYPE="bfloat16"
-BATCH="8"
-BASE_OUT_DIR="results/VoCuc-nnm"
-LOG_DIR="logs/eval"
-INCLUDE_PATH="$(pwd)/custom_tasks"
-
-mkdir -p "${BASE_OUT_DIR}" "${LOG_DIR}"
-
-# ============================================================
-# Danh sách checkpoint cuối mỗi subfolder
-# Qwen → full model (pytorch_model.bin)
-# LLaMA → LoRA adapter (adapter_model.bin) → cần base model
-# ============================================================
-declare -A CHECKPOINTS=(
-    ["qwen2.5-1.5B-it-distillm2"]="checkpoint-1869"
-    ["qwen2.5-1.5B-it-distillm2-1epoch"]="checkpoint-2492"
-    ["qwen2.5-1.5B-it-sft"]="checkpoint-1149"
-    ["llama-3.2-3B-it-distillm2"]="checkpoint-1869"
-    ["llama-3.2-3B-it-distillm2-1epoch"]="checkpoint-2492"   
-    ["llama-3.2-3B-it-sft"]="checkpoint-1911"                
-)
-
-# LLaMA dùng LoRA adapter → cần base model
+VENV="/home/phongdq/projects/NNM/.venv/bin"
+LM_EVAL="${VENV}/lm_eval"
+INCLUDE_PATH="$(pwd)/custom_tasks"     # chứa gsm_plus.yaml
+LOG_DIR="logs/eval_vllm"
+OUT_DIR="results/vllm"
+ADAPTER_BASE="/home/phongdq/projects/NNM/adapters"
 LLAMA_BASE="meta-llama/Llama-3.2-3B-Instruct"
 
-build_args() {
-    local SUBFOLDER=$1
-    local CHECKPOINT=$2
-    local OUT_DIR=$3
-
-    if [[ "${SUBFOLDER}" == qwen* ]]; then
-        # Full model — subfolder trỏ thẳng vào checkpoint
-        local FULL_SUBFOLDER="${SUBFOLDER}/${CHECKPOINT}"
-        COMMON_ARGS=(
-            --model hf
-            --model_args "pretrained=${MODEL_NAME},subfolder=${FULL_SUBFOLDER},tokenizer=${MODEL_NAME},tokenizer_subfolder=${SUBFOLDER},dtype=${DTYPE},trust_remote_code=True"
-            --device "${DEVICE}"
-            --batch_size "${BATCH}"
-            --apply_chat_template
-            --fewshot_as_multiturn
-            --include_path "${INCLUDE_PATH}"
-            --log_samples
-            --output_path "${OUT_DIR}"
-        )
-    else
-        # LLaMA — LoRA adapter
-        local FULL_SUBFOLDER="${SUBFOLDER}/${CHECKPOINT}"
-        COMMON_ARGS=(
-            --model hf
-            --model_args "pretrained=${LLAMA_BASE},peft=${MODEL_NAME},peft_subfolder=${FULL_SUBFOLDER},dtype=${DTYPE},trust_remote_code=True"
-            --device "${DEVICE}"
-            --batch_size "${BATCH}"
-            --apply_chat_template
-            --fewshot_as_multiturn
-            --include_path "${INCLUDE_PATH}"
-            --log_samples
-            --output_path "${OUT_DIR}"
-        )
-    fi
-}
+mkdir -p "${LOG_DIR}" "${OUT_DIR}"
 
 # ============================================================
-# Hàm chạy tất cả tasks cho 1 model
+# Hàm chạy đủ 10 tasks cho 1 model
 # ============================================================
-run_tasks() {
-    local SUBFOLDER=$1
-    local CHECKPOINT="${CHECKPOINTS[$SUBFOLDER]}"
-    local LABEL="${SUBFOLDER}__${CHECKPOINT}"
-    local OUT_DIR="${BASE_OUT_DIR}/${LABEL}"
-    local LOG_FILE="${LOG_DIR}/${LABEL}.log"
+run_eval() {
+    local LABEL=$1
+    local MODEL_ARGS=$2
+    local OUT="${OUT_DIR}/${LABEL}"
+    local LOG="${LOG_DIR}/${LABEL}.log"
 
-    mkdir -p "${OUT_DIR}"
-
+    mkdir -p "${OUT}"
     echo "[$(date '+%Y-%m-%d %H:%M:%S')] === Bắt đầu: ${LABEL} ==="
-    echo "  Log → ${LOG_FILE}"
 
-    build_args "${SUBFOLDER}" "${CHECKPOINT}" "${OUT_DIR}"
+    BASE_ARGS=(
+        --model vllm
+        --model_args "${MODEL_ARGS}"
+        --device cuda
+        --batch_size auto
+        --apply_chat_template
+        --fewshot_as_multiturn
+        --include_path "${INCLUDE_PATH}"
+        --log_samples
+        --output_path "${OUT}"
+    )
 
     {
         echo "=========================================="
-        echo "Model     : ${MODEL_NAME}"
-        echo "Subfolder : ${SUBFOLDER}"
-        echo "Checkpoint: ${CHECKPOINT}"
-        echo "Started   : $(date)"
+        echo "Label: ${LABEL}"
+        echo "Args : ${MODEL_ARGS}"
+        echo "Start: $(date)"
         echo "=========================================="
 
-        echo ">>> GSM8K"
-        lm_eval "${COMMON_ARGS[@]}" --tasks gsm8k --num_fewshot 5
+        echo ">>> [1/10] GSM8K"
+        "${LM_EVAL}" "${BASE_ARGS[@]}" --tasks gsm8k --num_fewshot 5
 
-        echo ">>> MATH500 (4-shot)"
-        lm_eval "${COMMON_ARGS[@]}" --tasks minerva_math500 --num_fewshot 4
+        # echo ">>> [2/10] GSM-Plus"
+        # "${LM_EVAL}" "${BASE_ARGS[@]}" --tasks gsm_plus --num_fewshot 5
 
-        echo ">>> MMLU-STEM"
-        lm_eval "${COMMON_ARGS[@]}" --tasks mmlu_stem --num_fewshot 5
+        echo ">>> [2/10] MATH 500"
+        "${LM_EVAL}" "${BASE_ARGS[@]}" --tasks minerva_math500 --num_fewshot 4
 
-        echo ">>> SciQ"
-        lm_eval "${COMMON_ARGS[@]}" --tasks sciq --num_fewshot 0
+        # echo ">>> [4/10] MMLU-Pro-Math"
+        # "${LM_EVAL}" "${BASE_ARGS[@]}" --tasks mmlu_pro_math --num_fewshot 5
 
-        echo ">>> MBPP"
-        lm_eval "${COMMON_ARGS[@]}" --tasks mbpp --num_fewshot 3 --confirm_run_unsafe_code
+        echo ">>> [3/10] MMLU-STEM"
+        "${LM_EVAL}" "${BASE_ARGS[@]}" --tasks mmlu_stem --num_fewshot 5
+
+        echo ">>> [4/10] SciQ"
+        "${LM_EVAL}" "${BASE_ARGS[@]}" --tasks sciq --num_fewshot 0
+
+        echo ">>> [5/10] MBPP"
+        "${LM_EVAL}" "${BASE_ARGS[@]}" --tasks mbpp --num_fewshot 3 --confirm_run_unsafe_code
+
+        # echo ">>> [8/10] BBH"
+        # "${LM_EVAL}" "${BASE_ARGS[@]}" --tasks bbh_cot_fewshot --num_fewshot 3
+
+        # echo ">>> [9/10] MuSR"
+        # "${LM_EVAL}" "${BASE_ARGS[@]}" --tasks leaderboard_musr --num_fewshot 0
+
+        # echo ">>> [10/10] IFEval"
+        # "${LM_EVAL}" "${BASE_ARGS[@]}" --tasks leaderboard_ifeval --num_fewshot 0
 
         echo "=========================================="
         echo "DONE: ${LABEL} | $(date)"
         echo "=========================================="
 
-    } 2>&1 | tee -a "${LOG_FILE}"
+    } 2>&1 | tee "${LOG}"
 
     echo "[$(date '+%Y-%m-%d %H:%M:%S')] === Xong: ${LABEL} ==="
 }
 
-run_all() {
-    for SUBFOLDER in \
-        "qwen2.5-1.5B-it-sft" \
-        "qwen2.5-1.5B-it-distillm2-1epoch" \
-        "qwen2.5-1.5B-it-distillm2" \
-        "llama-3.2-3B-it-sft" \
-        "llama-3.2-3B-it-distillm2-1epoch" \
-        "llama-3.2-3B-it-distillm2"
-    do
-        run_tasks "${SUBFOLDER}"
-    done
-}
+# ============================================================
+# Qwen — Full model (3 models)
+# ============================================================
+run_eval \
+    "qwen2.5-1.5B-it-sft__checkpoint-1149" \
+    "pretrained=VoCuc/nnm,subfolder=qwen2.5-1.5B-it-sft/checkpoint-1149,tensor_parallel_size=${TP},dtype=bfloat16,trust_remote_code=True"
 
-echo "CUDA_VISIBLE_DEVICES=${CUDA_VISIBLE_DEVICES}"
-echo "Checkpoints sẽ chạy:"
-for SF in "${!CHECKPOINTS[@]}"; do
-    echo "  ${SF} → ${CHECKPOINTS[$SF]}"
-done
-echo ""
+run_eval \
+    "qwen2.5-1.5B-it-distillm2__checkpoint-1869" \
+    "pretrained=VoCuc/nnm,subfolder=qwen2.5-1.5B-it-distillm2/checkpoint-1869,tensor_parallel_size=${TP},dtype=bfloat16,trust_remote_code=True"
 
-nohup bash -c "
-$(declare -f build_args)
-$(declare -f run_tasks)
-$(declare -f run_all)
-$(declare -p CHECKPOINTS)
-MODEL_NAME='${MODEL_NAME}'
-LLAMA_BASE='${LLAMA_BASE}'
-DEVICE='${DEVICE}'
-DTYPE='${DTYPE}'
-BATCH='${BATCH}'
-BASE_OUT_DIR='${BASE_OUT_DIR}'
-LOG_DIR='${LOG_DIR}'
-INCLUDE_PATH='${INCLUDE_PATH}'
-run_all
-" >> "${LOG_DIR}/master.log" 2>&1 &
+run_eval \
+    "qwen2.5-1.5B-it-distillm2-1epoch__checkpoint-2492" \
+    "pretrained=VoCuc/nnm,subfolder=qwen2.5-1.5B-it-distillm2-1epoch/checkpoint-2492,tensor_parallel_size=${TP},dtype=bfloat16,trust_remote_code=True"
 
-MASTER_PID=$!
-echo "Master PID : ${MASTER_PID}"
-echo "Master log : ${LOG_DIR}/master.log"
+# ============================================================
+# LLaMA — LoRA adapter (3 models, cần download adapter trước)
+# ============================================================
+run_eval \
+    "llama-3.2-3B-it-sft__checkpoint-1911" \
+    "pretrained=${LLAMA_BASE},peft=${ADAPTER_BASE}/llama-3.2-3B-it-sft/checkpoint-1911,tensor_parallel_size=${TP},dtype=bfloat16,trust_remote_code=True"
+
+run_eval \
+    "llama-3.2-3B-it-distillm2__checkpoint-1869" \
+    "pretrained=${LLAMA_BASE},peft=${ADAPTER_BASE}/llama-3.2-3B-it-distillm2/checkpoint-1869,tensor_parallel_size=${TP},dtype=bfloat16,trust_remote_code=True"
+
+run_eval \
+    "llama-3.2-3B-it-distillm2-1epoch__checkpoint-2492" \
+    "pretrained=${LLAMA_BASE},peft=${ADAPTER_BASE}/llama-3.2-3B-it-distillm2-1epoch/checkpoint-2492,tensor_parallel_size=${TP},dtype=bfloat16,trust_remote_code=True"
+
 echo ""
-echo "Theo dõi:"
-echo "  tail -f ${LOG_DIR}/master.log"
-echo "  tail -f '${LOG_DIR}/qwen2.5-1.5B-it-distillm2__checkpoint-1869.log'"
-echo ""
-echo "Dừng tất cả:"
-echo "  kill ${MASTER_PID}"
+echo "=========================================="
+echo "TẤT CẢ DONE | $(date)"
+echo "Kết quả: ${OUT_DIR}"
+echo "=========================================="
