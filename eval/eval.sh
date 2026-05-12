@@ -15,20 +15,22 @@ set -e
 # ============================================================
 # Config
 # ============================================================
-MODEL_NAME="pkcii/distillm2-sft"
-SUBFOLDER="checkpoint-1140"   # nếu model huggingface có subfolder chứa pytorch_model.bin, set tên subfolder này; nếu không có subfolder, set SUBFOLDER="" (empty string)
+MODEL_NAME="/home/hungpv/projects/NND/outputs/qwen2.5-math-nnm/checkpoint-4984"
+# SUBFOLDER="checkpoint-1140"   # nếu model huggingface có subfolder chứa pytorch_model.bin, set tên subfolder này; nếu không có subfolder, set SUBFOLDER="" (empty string)
 #MODEL_NAME="Qwen/Qwen2.5-Math-1.5B-Instruct"
-TOKENIZER="pkcii/distillm2-sft"   # nếu tokenizer cùng tên với model, set giống MODEL_NAME; nếu tokenizer khác tên hoặc có subfolder khác, set tên/tokenizer path ở đây
+TOKENIZER="/home/hungpv/projects/NND/outputs/qwen2.5-math-nnm/checkpoint-4984"   # nếu tokenizer cùng tên với model, set giống MODEL_NAME; nếu tokenizer khác tên hoặc có subfolder khác, set tên/tokenizer path ở đây
 DEVICE="cuda"
 DTYPE="bfloat16"
-BATCH="8"           # 'auto' để lm-eval tự chỉnh; hoặc set 32, 16, ...
-OUT_DIR="results/distillm2-sft"
+BATCH="32"           # 'auto' để lm-eval tự chỉnh; hoặc set 32, 16, ...
+OUT_DIR="results/distillm2-nnm"
 INCLUDE_PATH="$(pwd)/custom_tasks"   # nơi chứa gsm_plus.yaml
 
 # Common args
 COMMON_ARGS=(
     --model hf
-    --model_args "pretrained=${MODEL_NAME},subfolder=${SUBFOLDER},tokenizer=${TOKENIZER},dtype=${DTYPE},trust_remote_code=True"
+    # --model_args "pretrained=${MODEL_NAME},subfolder=${SUBFOLDER},tokenizer=${TOKENIZER},dtype=${DTYPE},trust_remote_code=True"
+    --model_args "pretrained=${MODEL_NAME},tokenizer=${TOKENIZER},dtype=${DTYPE},trust_remote_code=True"
+
     --device "${DEVICE}"
     --batch_size "${BATCH}"
     --apply_chat_template
@@ -51,17 +53,17 @@ lm_eval "${COMMON_ARGS[@]}" \
 # ============================================================
 # 2. GSM-Plus (5-shot, custom task)
 # ============================================================
-echo ">>> GSM-Plus"
-lm_eval "${COMMON_ARGS[@]}" \
-    --tasks gsm_plus \
-    --num_fewshot 5
+# echo ">>> GSM-Plus"
+# lm_eval "${COMMON_ARGS[@]}" \
+#     --tasks gsm_plus \
+#     --num_fewshot 5
 
 # ============================================================
 # 3. MATH / MATH-500 (4-shot, Minerva format)
 # ============================================================
 echo ">>> MATH (Minerva 4-shot)"
 lm_eval "${COMMON_ARGS[@]}" \
-    --tasks minerva_math \
+    --tasks minerva_math500 \
     --num_fewshot 4
 
 # ============================================================
@@ -101,26 +103,26 @@ lm_eval "${COMMON_ARGS[@]}" \
 # ============================================================
 # 8. BBH (3-shot CoT, 27 subtasks)
 # ============================================================
-echo ">>> BBH (cot 3-shot)"
-lm_eval "${COMMON_ARGS[@]}" \
-    --tasks bbh_cot_fewshot \
-    --num_fewshot 3
+# echo ">>> BBH (cot 3-shot)"
+# lm_eval "${COMMON_ARGS[@]}" \
+#     --tasks bbh_cot_fewshot \
+#     --num_fewshot 3
 
 # ============================================================
 # 9. MuSR (0-shot, leaderboard variant)
 # ============================================================
-echo ">>> MuSR"
-lm_eval "${COMMON_ARGS[@]}" \
-    --tasks leaderboard_musr \
-    --num_fewshot 0
+# echo ">>> MuSR"
+# lm_eval "${COMMON_ARGS[@]}" \
+#     --tasks leaderboard_musr \
+#     --num_fewshot 0
 
 # ============================================================
 # 10. IFEval (0-shot, google official rule eval)
 # ============================================================
-echo ">>> IFEval"
-lm_eval "${COMMON_ARGS[@]}" \
-    --tasks leaderboard_ifeval \
-    --num_fewshot 0
+# echo ">>> IFEval"
+# lm_eval "${COMMON_ARGS[@]}" \
+#     --tasks leaderboard_ifeval \
+#     --num_fewshot 0
 
 echo ""
 echo "=========================================="
