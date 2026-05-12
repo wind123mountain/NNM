@@ -4,6 +4,20 @@ ref_model_name_or_path: Qwen/Qwen2.5-14B-Instruct
 torch_dtype: bfloat16
 attn_implementation: sdpa
 
+# LoRA arguments
+use_peft: true
+lora_r: 16
+lora_alpha: 128
+lora_dropout: 0.05
+lora_target_modules:
+- q_proj
+- k_proj
+- v_proj
+- o_proj
+- gate_proj
+- up_proj
+- down_proj
+
 # Data training arguments
 dataset_mixer:
   data/reformatted/distill-qwen2.5-14B-Instruct: 1.0
