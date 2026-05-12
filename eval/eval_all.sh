@@ -23,9 +23,9 @@ mkdir -p "${BASE_OUT_DIR}" "${LOG_DIR}"
 # LLaMA → LoRA adapter (adapter_model.bin) → cần base model
 # ============================================================
 declare -A CHECKPOINTS=(
-    ["qwen2.5-1.5B-it-distillm2"]="checkpoint-1869"
-    ["qwen2.5-1.5B-it-distillm2-1epoch"]="checkpoint-2492"
-    ["qwen2.5-1.5B-it-sft"]="checkpoint-1149"
+    # ["qwen2.5-1.5B-it-distillm2"]="checkpoint-1869"
+    # ["qwen2.5-1.5B-it-distillm2-1epoch"]="checkpoint-2492"
+    # ["qwen2.5-1.5B-it-sft"]="checkpoint-1149"
     ["llama-3.2-3B-it-distillm2"]="checkpoint-1869"
     ["llama-3.2-3B-it-distillm2-1epoch"]="checkpoint-2492"   
     ["llama-3.2-3B-it-sft"]="checkpoint-1911"                
