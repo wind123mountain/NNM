@@ -88,9 +88,7 @@ def main():
 
     # Set seed for reproducibility
     set_seed(training_args.seed)
-    data_args.dataset_mixer = {
-    "/mnt/hungpv/projects/NND/math-data/reformatted/distill-qwen2.5-Math-1.5B-Instruct": 1.0
-    }
+
     ###############
     # Load datasets
     ###############
@@ -122,7 +120,6 @@ def main():
             "task": "dpo",
             "auto_insert_empty_system_msg": data_args.auto_insert_empty_system_msg,
         },
-        num_proc=data_args.preprocessing_num_workers,
         remove_columns=column_names,
         desc="Formatting comparisons with prompt template",
     )
