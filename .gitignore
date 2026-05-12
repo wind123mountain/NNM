@@ -179,3 +179,4 @@ cache-*
 uv.lock
 data/
 math-data/
+ckpts/
