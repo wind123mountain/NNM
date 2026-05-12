@@ -37,7 +37,7 @@ export CUDA_VISIBLE_DEVICES=0,1   # chọn GPU muốn dùng
 TP=2                               # tensor_parallel = số GPU
 
 VENV="./.venv/bin"
-LM_EVAL="${VENV}/lm_eval"
+LM_EVAL="lm_eval"
 LOG_DIR="logs/eval"
 OUT_DIR="results/vllm"
 mkdir -p "${LOG_DIR}" "${OUT_DIR}"
