@@ -178,3 +178,4 @@ results/
 cache-*
 uv.lock
 data/
+math-data/

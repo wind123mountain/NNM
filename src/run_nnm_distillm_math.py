@@ -40,11 +40,7 @@ from alignment import (
 )
 from peft import PeftConfig, PeftModel
 from distillm_nnm_trainer import DistiLLMTrainer
-
-from datasets import disable_caching
-
-disable_caching()
-
+#from distillm_trainer import DistiLLMTrainer
 logger = logging.getLogger(__name__)
 
 
@@ -55,6 +51,20 @@ def main():
     #######
     # Setup
     #######
+    if not hasattr(training_args, "nnm_lambda"):
+        training_args.nnm_lambda           = 0.05
+        training_args.nnm_target           = "chosen"   # "chosen" | "concatenated" | "both"
+        training_args.nnm_K_centroids      = 128
+        training_args.nnm_d_prime          = 256
+        training_args.nnm_ns_iters         = 5
+        training_args.nnm_warmup           = 100
+        training_args.nnm_n_mid_layers     = 4
+        training_args.nnm_centroid_batches = 500
+        training_args.nnm_chosen_weight    = 1.0
+        training_args.nnm_rejected_weight  = 0.5
+        # Optional explicit layer mapping (None = auto 40-85%)
+        # training_args.nnm_student_layer_mapping = [10, 12, 14, 16]
+        # training_args.nnm_teacher_layer_mapping = [12, 16, 20, 24]
     logging.basicConfig(
         format="%(asctime)s - %(levelname)s - %(name)s - %(message)s",
         datefmt="%Y-%m-%d %H:%M:%S",
@@ -78,7 +88,9 @@ def main():
 
     # Set seed for reproducibility
     set_seed(training_args.seed)
-
+    data_args.dataset_mixer = {
+    "/mnt/hungpv/projects/NND/math-data/reformatted/distill-qwen2.5-Math-1.5B-Instruct": 1.0
+    }
     ###############
     # Load datasets
     ###############
@@ -110,10 +122,17 @@ def main():
             "task": "dpo",
             "auto_insert_empty_system_msg": data_args.auto_insert_empty_system_msg,
         },
+        num_proc=data_args.preprocessing_num_workers,
         remove_columns=column_names,
         desc="Formatting comparisons with prompt template",
-        load_from_cache_file=False,
     )
+
+    # ── Rename columns về đúng tên mà trainer expect ──
+    raw_datasets = raw_datasets.rename_columns({
+        "text_prompt": "prompt",
+        "text_chosen": "chosen",
+        "text_rejected": "rejected",
+    })
 
     # ##########################
     # # Decontaminate benchmarks
@@ -132,18 +151,17 @@ def main():
     #     f"Decontaminated {num_filtered_train_samples} ({num_filtered_train_samples/num_raw_train_samples * 100:.2f}%) samples from the training set."
     # )
 
-    # Replace column names with what TRL needs, text_chosen -> chosen and text_rejected -> rejected
-    for split in ["train", "test"]:
-        raw_datasets[split] = raw_datasets[split].rename_columns(
-            {"text_prompt": "prompt", "text_chosen": "chosen", "text_rejected": "rejected"}
-        )
+    # # Replace column names with what TRL needs, text_chosen -> chosen and text_rejected -> rejected
+    # for split in ["train", "test"]:
+    #     raw_datasets[split] = raw_datasets[split].rename_columns(
+    #         {"text_prompt": "prompt", "text_chosen": "chosen", "text_rejected": "rejected"}
+    #     )
 
     # Log a few random samples from the training set:
-    if training_args.local_rank in [-1, 0]:
-        for index in random.sample(range(len(raw_datasets["train"])), 3):
-            logger.info(f"Prompt sample {index} of the raw training set:\n\n{raw_datasets['train'][index]['prompt']}")
-            logger.info(f"Chosen sample {index} of the raw training set:\n\n{raw_datasets['train'][index]['chosen']}")
-            logger.info(f"Rejected sample {index} of the raw training set:\n\n{raw_datasets['train'][index]['rejected']}")
+    # for index in random.sample(range(len(raw_datasets["train"])), 3):
+    #     logger.info(f"Prompt sample {index} of the raw training set:\n\n{raw_datasets['train'][index]['prompt']}")
+    #     logger.info(f"Chosen sample {index} of the raw training set:\n\n{raw_datasets['train'][index]['chosen']}")
+    #     logger.info(f"Rejected sample {index} of the raw training set:\n\n{raw_datasets['train'][index]['rejected']}")
 
     torch_dtype = (
         model_args.torch_dtype if model_args.torch_dtype in ["auto", None] else getattr(torch, model_args.torch_dtype)
@@ -193,6 +211,8 @@ def main():
     #########################
     # Instantiate DPO trainer
     #########################
+    # Fix DDP: projectors reused across chosen/rejected
+    training_args.ddp_find_unused_parameters = False
     trainer = DistiLLMTrainer(
         model,
         ref_model,
