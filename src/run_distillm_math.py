@@ -41,6 +41,10 @@ from alignment import (
 from peft import PeftConfig, PeftModel
 from distillm_trainer import DistiLLMTrainer
 
+from datasets import disable_caching
+
+disable_caching()
+
 logger = logging.getLogger(__name__)
 
 
@@ -106,9 +110,9 @@ def main():
             "task": "dpo",
             "auto_insert_empty_system_msg": data_args.auto_insert_empty_system_msg,
         },
-        num_proc=data_args.preprocessing_num_workers,
         remove_columns=column_names,
         desc="Formatting comparisons with prompt template",
+        load_from_cache_file=False,
     )
 
     # ##########################
@@ -135,10 +139,11 @@ def main():
         )
 
     # Log a few random samples from the training set:
-    for index in random.sample(range(len(raw_datasets["train"])), 3):
-        logger.info(f"Prompt sample {index} of the raw training set:\n\n{raw_datasets['train'][index]['prompt']}")
-        logger.info(f"Chosen sample {index} of the raw training set:\n\n{raw_datasets['train'][index]['chosen']}")
-        logger.info(f"Rejected sample {index} of the raw training set:\n\n{raw_datasets['train'][index]['rejected']}")
+    if training_args.local_rank in [-1, 0]:
+        for index in random.sample(range(len(raw_datasets["train"])), 3):
+            logger.info(f"Prompt sample {index} of the raw training set:\n\n{raw_datasets['train'][index]['prompt']}")
+            logger.info(f"Chosen sample {index} of the raw training set:\n\n{raw_datasets['train'][index]['chosen']}")
+            logger.info(f"Rejected sample {index} of the raw training set:\n\n{raw_datasets['train'][index]['rejected']}")
 
     torch_dtype = (
         model_args.torch_dtype if model_args.torch_dtype in ["auto", None] else getattr(torch, model_args.torch_dtype)
