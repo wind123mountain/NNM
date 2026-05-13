@@ -60,18 +60,19 @@ fi
     echo "[GPU 2,3] Done!"
 ) &
 
-# (
-#     # echo "[GPU 4,5] Start Distill-1e Qwen 0.5B"
-#     # CUDA_VISIBLE_DEVICES=4,5 bash ./scripts/train/qwen2.5-0.5B/distillm_2_1e.sh 2>&1 | tee outputs/logs/distillm_2_qwen2.5_0.5b-1e.log
+(
+    # echo "[GPU 4,5] Start Distill-1e Qwen 0.5B"
+    # CUDA_VISIBLE_DEVICES=4,5 bash ./scripts/train/qwen2.5-0.5B/distillm_2_1e.sh 2>&1 | tee outputs/logs/distillm_2_qwen2.5_0.5b-1e.log
     
-#     echo "[GPU 4,5] Start Distill-1e Llama 3.2 3B"
-#     CUDA_VISIBLE_DEVICES=4,5 bash ./scripts/train/llama3.2-3B-it/distillm_2_1e.sh 2>&1 | tee outputs/logs/llama3.2_3b_it_distillm_2_1e.log
+    echo "[GPU 4,5] Start Distill-1e Llama 3.2 3B"
+    CUDA_VISIBLE_DEVICES=4,5 bash ./scripts/train/llama3.2-3B-it/distillm_2_1e.sh 2>&1 | tee outputs/logs/llama3.2_3b_it_distillm_2_1e.log
     
-#     echo "[GPU 4,5] Start Distill-1e Qwen 1.5B"
-#     CUDA_VISIBLE_DEVICES=4,5 bash ./scripts/train/qwen2.5-1.5B-it/distillm_2_1e.sh 2>&1 | tee outputs/logs/distillm_2_qwen2.5_1.5b_1e.log
+    echo "[GPU 4,5] Start Distill-1e Qwen 1.5B"
+    CUDA_VISIBLE_DEVICES=4,5 bash ./scripts/train/qwen2.5-1.5B-it/distillm_2_1e.sh 2>&1 | tee outputs/logs/distillm_2_qwen2.5_1.5b_1e.log
     
-#     echo "[GPU 4,5] Done!"
-# ) &
+    echo "[GPU 4,5] Done!"
+) &
+
 
 
 wait
