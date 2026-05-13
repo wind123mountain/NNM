@@ -601,7 +601,7 @@ class DistiLLMTrainer(Trainer):
         self.ref_model.eval()
 
 # ═══ NNM additions ═══
-        self.nnm_target     = getattr(args, "nnm_target", "chosen")
+        self.nnm_target     = getattr(args, "nnm_target", "concatenated")
         self.nnm_lambda     = getattr(args, "nnm_lambda", 0.1)
         self.nnm_K          = getattr(args, "nnm_K_centroids", 128)
         self.nnm_d_prime    = getattr(args, "nnm_d_prime", 256)
@@ -1099,7 +1099,9 @@ class DistiLLMTrainer(Trainer):
                         _,
                         _,
                         _,
-                    ) = self.concatenated_forward(self.model, padded_batch)
+                        _,
+                        _,
+                    ) = self.concatenated_forward(self.model, self.ref_model, padded_batch)
             else:
                 (
                     reference_chosen_logps,
@@ -1107,7 +1109,10 @@ class DistiLLMTrainer(Trainer):
                     _,
                     _,
                     _,
-                ) = self.concatenated_forward(self.ref_model, padded_batch)
+                    _,
+                    _,
+                ) = self.concatenated_forward(self.ref_model, self.ref_model, padded_batch)
+
 
         return reference_chosen_logps, reference_rejected_logps
 
@@ -1639,8 +1644,8 @@ class DistiLLMTrainer(Trainer):
 
         # logits for the chosen and rejected samples from model
         logits_dict = {
-            "eval_logits/chosen": metrics["eval_logits/chosen"],
-            "eval_logits/rejected": metrics["eval_logits/rejected"],
+            "eval_logqs/chosen": metrics["eval_logqs/chosen"],   
+            "eval_logqs/rejected": metrics["eval_logqs/rejected"], 
         }
         logits = tuple(v.unsqueeze(dim=0) for k, v in logits_dict.items() if k not in ignore_keys)
         logits = torch.stack(logits).mean(axis=1).to(self.accelerator.device)
@@ -1717,9 +1722,9 @@ class DistiLLMTrainer(Trainer):
             logs[key] = torch.tensor(metrics).mean().item()
         if self.update_alpha:
             if self.logp_logq is None:
-                self.logp_logq = self._stored_metrics['logps_logqs/chosen']
+                self.logp_logq = torch.tensor(self._stored_metrics[train_eval]['logps_logqs/chosen']).mean().item()
             if self.logq_logp is None:
-                self.logq_logp = self._stored_metrics['logqs_logps/rejected']
+                self.logq_logp = torch.tensor(self._stored_metrics[train_eval]['logqs_logps/rejected']).mean().item()
         del self._stored_metrics[train_eval]
         return super().log(logs, start_time) if start_time is not None else super().log(logs)
 
