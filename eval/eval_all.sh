@@ -33,8 +33,7 @@ hf download VoCuc/AMiD --include "qwen2.5-0.5B#amid/ab_pr_0.5_0.5_8_1e-4/7476/*"
     --local-dir "${CKPT_DIR}"
 
 
-export CUDA_VISIBLE_DEVICES=0,1   # chọn GPU muốn dùng
-TP=2                               # tensor_parallel = số GPU
+TP=4
 
 VENV="./.venv/bin"
 LM_EVAL="lm_eval"
