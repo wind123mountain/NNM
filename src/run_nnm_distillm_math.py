@@ -208,8 +208,6 @@ def main():
     #########################
     # Instantiate DPO trainer
     #########################
-    # Fix DDP: projectors reused across chosen/rejected
-    training_args.ddp_find_unused_parameters = False
     trainer = DistiLLMTrainer(
         model,
         ref_model,

@@ -129,15 +129,15 @@ run_eval \
 
 run_eval \
     "llama-3.2-3B-it-sft-checkpoint-1911" \
-    "pretrained=meta-llama/Llama-3.2-3B-Instruct,lora_local_path=${CKPT_DIR}/llama-3.2-3B-it-sft/checkpoint-1911,tensor_parallel_size=${TP},dtype=float16,gpu_memory_utilization=0.85,trust_remote_code=True"
+    "pretrained=${CKPT_DIR}/llama-3.2-3B-it-sft/checkpoint-1911,tensor_parallel_size=${TP},dtype=float16,gpu_memory_utilization=0.85,trust_remote_code=True"
 
 run_eval \
     "llama-3.2-3B-it-distillm2-checkpoint-1869" \
-    "pretrained=meta-llama/Llama-3.2-3B-Instruct,lora_local_path=${CKPT_DIR}/llama-3.2-3B-it-distillm2/checkpoint-1869,tensor_parallel_size=${TP},dtype=float16,gpu_memory_utilization=0.85,trust_remote_code=True"
+    "pretrained=${CKPT_DIR}/llama-3.2-3B-it-distillm2/checkpoint-1869,tensor_parallel_size=${TP},dtype=float16,gpu_memory_utilization=0.85,trust_remote_code=True"
 
 run_eval \
     "llama-3.2-3B-it-distillm2-1epoch-checkpoint-2492" \
-    "pretrained=meta-llama/Llama-3.2-3B-Instruct,lora_local_path=${CKPT_DIR}/llama-3.2-3B-it-distillm2-1epoch/checkpoint-2492,tensor_parallel_size=${TP},dtype=float16,gpu_memory_utilization=0.85,trust_remote_code=True"
+    "pretrained=${CKPT_DIR}/llama-3.2-3B-it-distillm2-1epoch/checkpoint-2492,tensor_parallel_size=${TP},dtype=float16,gpu_memory_utilization=0.85,trust_remote_code=True"
 
 run_eval \
     "qwen2.5-0.5B#amid-ab_pr_0.5_0.5_8_1e-4-7476" \

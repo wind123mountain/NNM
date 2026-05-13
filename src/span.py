@@ -71,10 +71,317 @@ if is_deepspeed_available():
 if is_sagemaker_mp_enabled():
     import smdistributed.modelparallel.torch as smp
 
-from nnm_module import (
-    make_R, layer_weight, select_mid_layers,
-    compute_nnm_loss, build_teacher_centroids,
-)
+import spacy
+from spacy.matcher import Matcher
+
+
+
+def compute_token_weights(hidden_state, attention_mask):
+    std = hidden_state.std(dim=-1, keepdim=True) + 1e-5
+    Q = hidden_state / std
+    K = hidden_state / std
+    scores = torch.matmul(Q, K.transpose(-1, -2)) / (hidden_state.size(-1) ** 0.5)
+
+    mask = attention_mask.unsqueeze(1).expand(-1, scores.size(-2), -1)
+    scores = scores.masked_fill(mask == 0, float('-inf'))
+    diag_mask = torch.eye(scores.size(-1), device=scores.device, dtype=torch.bool)
+    scores = scores.masked_fill(diag_mask.unsqueeze(0), float('-inf'))
+
+    attn_weights = F.softmax(scores, dim=-1)  # [1, L, L]
+    attn_weights = attn_weights * mask
+    attn_weights = attn_weights / attn_weights.sum(dim=-1, keepdim=True)
+
+    token_weights = attn_weights.mean(dim=1).squeeze(0)  # [L]
+    return token_weights.detach()
+
+def prepare_span_indices_and_weights(t_layer_weights, s_layer_weights, 
+                                     attention_mask, offsets_mapping, spans_offsets):
+    device = attention_mask.device
+    B_size, SeqLen = attention_mask.shape
+
+    max_spans = max(len(s) for s in spans_offsets)
+    if max_spans == 0:
+        print(f"No spans found in the batch.")
+        return torch.tensor(0.0, device=device)
+
+    # (B_size, max_spans)
+    padded_span_starts = torch.zeros(B_size, max_spans, dtype=torch.long, device=device)
+    padded_span_ends = torch.zeros(B_size, max_spans, dtype=torch.long, device=device)
+    padded_span_mask = torch.zeros(B_size, max_spans, dtype=torch.bool, device=device)
+
+    for i in range(B_size):
+        num_spans_i = len(spans_offsets[i])
+        if num_spans_i > 0:
+            spans_i = torch.tensor(spans_offsets[i], device=device, dtype=torch.long)
+            padded_span_starts[i, :num_spans_i] = spans_i[:, 0]
+            padded_span_ends[i, :num_spans_i] = spans_i[:, 1]
+            padded_span_mask[i, :num_spans_i] = True
+    
+    if offsets_mapping.shape[1] != SeqLen:
+        current_offsets_mapping = offsets_mapping[:, :SeqLen, :]
+    else:
+        current_offsets_mapping = offsets_mapping
+
+    # (B_size, SeqLen, 1)
+    offsets_start_expanded = current_offsets_mapping[..., 0].unsqueeze(2).to(device)
+    offsets_end_expanded = current_offsets_mapping[..., 1].unsqueeze(2).to(device)
+    
+    # (B_size, 1, max_spans)
+    span_starts_expanded = padded_span_starts.unsqueeze(1)
+    span_ends_expanded = padded_span_ends.unsqueeze(1)
+
+    token_in_span_map = (offsets_start_expanded + 1 >= span_starts_expanded) & \
+                        (offsets_end_expanded <= span_ends_expanded)
+
+    attention_mask_expanded = attention_mask.unsqueeze(2).bool()
+    span_mask_expanded = padded_span_mask.unsqueeze(1) 
+
+    final_token_to_span_map = token_in_span_map & attention_mask_expanded & span_mask_expanded
+
+    if not final_token_to_span_map.any():
+        print(f"No valid tokens found for any spans in the batch.")
+        return torch.tensor(0.0, device=device)
+
+    nonzero_indices = final_token_to_span_map.nonzero(as_tuple=False)
+    
+    batch_indices = nonzero_indices[:, 0] # (T_total)
+    token_indices = nonzero_indices[:, 1] # (T_total)
+    local_span_indices = nonzero_indices[:, 2] # (T_total)
+
+    All_Indices = batch_indices * SeqLen + token_indices
+
+    global_span_ids_flat = batch_indices * max_spans + local_span_indices
+    _, Span_IDs = torch.unique(global_span_ids_flat, return_inverse=True) # (T_total)
+    Max_Spans = Span_IDs.max().item() + 1 # Tổng số span duy nhất
+
+    Batch_ID_for_Spans = torch.empty(Max_Spans, device=device, dtype=torch.long)
+    Batch_ID_for_Spans.scatter_(0, Span_IDs, batch_indices)
+
+    def gather_layer_weights(layer_weights):
+        B_size, SeqLen = attention_mask.shape
+        num_layers = layer_weights.shape[0]
+        layer_weights_flat = layer_weights.view(num_layers, B_size * SeqLen)
+        token_weights_unnorm = layer_weights_flat[:, All_Indices].float()
+        batch_indices_expanded = batch_indices.unsqueeze(0).expand(num_layers, -1)
+        sample_weight_sums = torch.zeros(num_layers, B_size, device=device, dtype=torch.float)
+        sample_weight_sums.scatter_add_(1, batch_indices_expanded, token_weights_unnorm)
+        sample_weight_sums = sample_weight_sums.clamp(min=1e-5)
+        sample_weight_sums_gathered = torch.gather(sample_weight_sums, 1, batch_indices_expanded)
+        Token_Weights_all = token_weights_unnorm / sample_weight_sums_gathered
+
+        return Token_Weights_all
+
+    T_Token_Weights_all = gather_layer_weights(t_layer_weights)
+    S_Token_Weights_all = gather_layer_weights(s_layer_weights)
+
+    return All_Indices, T_Token_Weights_all, S_Token_Weights_all, Span_IDs, Max_Spans, Batch_ID_for_Spans
+
+
+def get_span_loss(projectors, attention_mask, s_hidden_states, t_hidden_states, 
+                  offsets_mapping, spans_offsets, teacher_layer_mapping, student_layer_mapping):
+    
+    t_layer_weights = []
+    s_layer_weights = []
+    for i in teacher_layer_mapping:
+        weights = compute_token_weights(t_hidden_states[i], attention_mask)  # (B, SeqLen)
+        t_layer_weights.append(weights)
+    for i in student_layer_mapping:
+        weights = compute_token_weights(s_hidden_states[i], attention_mask)  # (B, SeqLen)
+        s_layer_weights.append(weights)
+
+    t_layer_weights = torch.stack(t_layer_weights)  # (num_layers, B, SeqLen)
+    s_layer_weights = torch.stack(s_layer_weights)  # (num_layers, B, SeqLen)
+
+    (All_Indices, T_Token_Weights_all, S_Token_Weights_all, 
+     Span_IDs, Max_Spans, Batch_ID_for_Spans) =  prepare_span_indices_and_weights(t_layer_weights, s_layer_weights, 
+                                                                                  attention_mask, offsets_mapping, spans_offsets)
+    final_loss = 0.0
+    for i, (s_idx, t_idx, projector) in enumerate(zip(student_layer_mapping, teacher_layer_mapping, projectors)):
+        s_hidden = s_hidden_states[s_idx]
+        t_hidden = t_hidden_states[t_idx]
+        span_loss = compute_hidden_span_loss(projector, s_hidden, t_hidden, All_Indices,
+                                             S_Token_Weights_all[i], T_Token_Weights_all[i], 
+                                             Span_IDs, Max_Spans, Batch_ID_for_Spans)
+        final_loss += span_loss
+
+    return final_loss
+
+def get_token_loss(attention_mask, s_hidden_states, t_hidden_states, 
+                   teacher_layer_mapping, student_layer_mapping):
+    t_layer_weights = []
+    for i in teacher_layer_mapping:
+        weights = compute_token_weights(t_hidden_states[i], attention_mask)  # (B, SeqLen)
+        t_layer_weights.append(weights)
+    N = attention_mask.size(-1)
+    final_loss = 0.0
+    for i, (s_idx, t_idx) in enumerate(zip(student_layer_mapping, teacher_layer_mapping)):
+        pair_weights = t_layer_weights[i].unsqueeze(2) * t_layer_weights[i].unsqueeze(1)
+        mask = torch.eye(N, device=pair_weights.device).bool()  # (N, N)
+        pair_weights[:, mask] = 0.0
+        pair_weights = pair_weights / pair_weights.sum(dim=(1, 2), keepdim=True).clamp(min=1e-5)
+
+        s_tokens = F.normalize(s_hidden_states[s_idx], dim=-1, eps=1e-5)
+        t_tokens = F.normalize(t_hidden_states[t_idx], dim=-1, eps=1e-5)
+        student_scores = torch.matmul(s_tokens, s_tokens.transpose(-1, -2))
+        teacher_scores = torch.matmul(t_tokens, t_tokens.transpose(-1, -2))
+        span_loss = F.mse_loss(student_scores, teacher_scores, reduction='none')
+        span_loss = (span_loss * pair_weights).sum() / pair_weights.sum()
+
+        final_loss += span_loss
+
+    final_loss = final_loss / len(student_layer_mapping)
+    return final_loss
+
+def compute_overall_span_loss(projectors, attention_mask, s_hidden_states, t_hidden_states, 
+                              offsets_mapping, prases_offsets, spans_offsets, words_offsets, args):
+    
+    # s_token_mapping = args.student_layer_mapping[:args.split_layer_mapping[0]]
+    # t_token_mapping = args.teacher_layer_mapping[:args.split_layer_mapping[0]]
+    # token_loss = get_token_loss(attention_mask, s_hidden_states, 
+    #                             t_hidden_states, t_token_mapping, s_token_mapping)
+    
+    s_word_mapping = args.student_layer_mapping[args.split_layer_mapping[0]:args.split_layer_mapping[1]]
+    t_word_mapping = args.teacher_layer_mapping[args.split_layer_mapping[0]:args.split_layer_mapping[1]]
+    word_projectors = projectors[args.split_layer_mapping[0]:args.split_layer_mapping[1]]
+    word_loss = get_span_loss(word_projectors, attention_mask, s_hidden_states, t_hidden_states, 
+                              offsets_mapping, words_offsets, t_word_mapping, s_word_mapping)
+    
+    s_span_mapping = args.student_layer_mapping[args.split_layer_mapping[1]:args.split_layer_mapping[2]]
+    t_span_mapping = args.teacher_layer_mapping[args.split_layer_mapping[1]:args.split_layer_mapping[2]]
+    span_projectors = projectors[args.split_layer_mapping[1]:args.split_layer_mapping[2]]
+    span_loss = get_span_loss(span_projectors, attention_mask, s_hidden_states, t_hidden_states, 
+                              offsets_mapping, spans_offsets, t_span_mapping, s_span_mapping)
+    
+    # s_prase_mapping = args.student_layer_mapping[args.split_layer_mapping[2]:]
+    # t_prase_mapping = args.teacher_layer_mapping[args.split_layer_mapping[2]:]
+    # prases_loss = get_span_loss(attention_mask, s_hidden_states, t_hidden_states, 
+    #                             offsets_mapping, prases_offsets, t_prase_mapping, s_prase_mapping)
+
+    # overall_loss = (token_loss + word_loss + span_loss + prases_loss) / 4
+    overall_loss = (word_loss + span_loss) / len(args.student_layer_mapping)
+    # overall_loss = (word_loss + span_loss + prases_loss) / 3
+    return overall_loss
+
+def compute_hidden_span_loss(projector, s_hidden_state, t_hidden_state, All_Indices, 
+                             S_Token_Weights_all, T_Token_Weights_all, Span_IDs, Max_Spans, Batch_ID_for_Spans):
+    D_hidden_s = s_hidden_state.size(-1)
+    D_hidden_t = t_hidden_state.size(-1)
+    device = t_hidden_state.device
+    B_size = s_hidden_state.size(0)
+
+    T_Hidden_Flat = t_hidden_state.flatten(0, 1) # (B*SeqLen, D_hidden_t)
+    S_Hidden_Flat = s_hidden_state.flatten(0, 1) # (B*SeqLen, D_hidden_s)
+
+    # 1. Trích xuất và Áp dụng Trọng số
+    T_span_all = T_Hidden_Flat[All_Indices] # (T_total, D_hidden_t)
+    S_span_all = S_Hidden_Flat[All_Indices] # (T_total, D_hidden_s)
+    
+    T_Token_Weights_expanded = T_Token_Weights_all.unsqueeze(-1) 
+    S_Token_Weights_expanded = S_Token_Weights_all.unsqueeze(-1)
+    
+    T_span_weighted = T_span_all * T_Token_Weights_expanded # (T_total, D_hidden_t)
+    S_span_weighted = S_span_all * S_Token_Weights_expanded # (T_total, D_hidden_s)
+
+    Span_IDs_expanded_t = Span_IDs.unsqueeze(-1).expand(-1, D_hidden_t) 
+    Span_IDs_expanded_s = Span_IDs.unsqueeze(-1).expand(-1, D_hidden_s) 
+
+    T_span_sum = torch.zeros(Max_Spans, D_hidden_t, device=device)
+    S_span_sum = torch.zeros(Max_Spans, D_hidden_s, device=device)
+    T_Weight_sum_1d = torch.zeros(Max_Spans, device=device)
+    S_Weight_sum_1d = torch.zeros(Max_Spans, device=device)
+
+    T_span_sum.scatter_add_(0, Span_IDs_expanded_t, T_span_weighted)
+    S_span_sum.scatter_add_(0, Span_IDs_expanded_s, S_span_weighted)
+
+    T_Weight_sum_1d.scatter_add_(0, Span_IDs, T_Token_Weights_all) 
+    T_Weight_sum = T_Weight_sum_1d.clamp(min=1e-5).unsqueeze(-1) # (Max_Spans, 1)
+    S_Weight_sum_1d.scatter_add_(0, Span_IDs, S_Token_Weights_all)
+    S_Weight_sum = S_Weight_sum_1d.clamp(min=1e-5).unsqueeze(-1) # (Max_Spans, 1)
+
+    # Tính Trung bình (Mean)
+    T_span_hidden_mean = T_span_sum / T_Weight_sum 
+    S_span_hidden_mean = S_span_sum / S_Weight_sum
+
+    S_normalized = F.normalize(S_span_hidden_mean, p=2, dim=-1)
+    T_normalized = F.normalize(T_span_hidden_mean, p=2, dim=-1)
+    S_Full_Sim_Matrix = S_normalized @ S_normalized.T
+    T_Full_Sim_Matrix = T_normalized @ T_normalized.T
+
+    Batch_IDs_col = Batch_ID_for_Spans.unsqueeze(1)
+    Batch_IDs_row = Batch_ID_for_Spans.unsqueeze(0)
+    Same_Batch_Mask = (Batch_IDs_col == Batch_IDs_row)
+    Not_Self_Mask = ~torch.eye(Max_Spans, dtype=torch.bool, device=device)
+    Final_Mask = Same_Batch_Mask & Not_Self_Mask
+
+    S_intra_batch_similarities_flat = torch.masked_select(S_Full_Sim_Matrix, Final_Mask)
+    T_intra_batch_similarities_flat = torch.masked_select(T_Full_Sim_Matrix, Final_Mask)
+
+    Pair_Weights_Matrix = T_Weight_sum_1d.unsqueeze(1) * T_Weight_sum_1d.unsqueeze(0)
+    Valid_Pair_Weights = torch.masked_select(Pair_Weights_Matrix, Final_Mask)
+
+    span_loss = F.mse_loss(S_intra_batch_similarities_flat, T_intra_batch_similarities_flat, reduction='none')
+    span_loss = (span_loss * Valid_Pair_Weights).sum() / Valid_Pair_Weights.sum().clamp(min=1e-5)
+
+    s_hidden_expand = projector(S_span_all)
+    token_cos = F.cosine_similarity(s_hidden_expand, T_span_all, dim=-1, eps=1e-5)
+    token_loss = 1 - token_cos
+    token_loss = (token_loss * T_Token_Weights_all).sum() / T_Token_Weights_all.sum().clamp(min=1e-5)
+
+    return span_loss + token_loss / 10.0
+
+
+def filter_overlapping_spans(spans):
+    sorted_spans = sorted(spans, key=lambda s: (s[0], -s[1]))
+    filtered = []
+    words = []
+    if not sorted_spans:
+        return filtered
+
+    current_span = sorted_spans[0]
+    for next_span in sorted_spans[1:]:
+        _, current_end, p = current_span
+        _, next_end, _ = next_span
+        if next_end <= current_end:
+            continue
+        filtered.append((current_span[0], current_span[1]))
+
+        n_token = len(p)
+        words.extend([(p[idx - 1].idx, p[idx].idx) for idx in range(1, n_token)])
+        words.append((p[n_token - 1].idx, p[n_token - 1].idx + len(p[n_token - 1])))
+
+        current_span = next_span
+    filtered.append((current_span[0], current_span[1]))
+
+    p = current_span[2]
+    n_token = len(p)
+    words.extend([(p[idx - 1].idx, p[idx].idx) for idx in range(1, n_token)])
+    words.append((p[n_token - 1].idx, p[n_token-1].idx + len(p[n_token-1])))
+    
+    return filtered, words
+
+def get_spans_offsets(texts, nlp, matcher):
+    disabled_components = ["ner", "lemmatizer"]
+
+    spans = []
+    words = []
+    prases = []
+
+    for doc in nlp.pipe(texts, disable=disabled_components, n_process=4):
+        spans_with_offsets = []
+        
+        vps = matcher(doc)
+        for _, start, end in vps:
+            vp = doc[start:end]
+            spans_with_offsets.append((vp.start_char, vp.end_char, vp))
+            
+        ncs = doc.noun_chunks
+        spans_with_offsets.extend([(nc.start_char, nc.end_char, nc) for nc in ncs])
+
+        unique_spans, unique_words = filter_overlapping_spans(spans_with_offsets)
+        spans.append(unique_spans)
+        words.append(unique_words)
+
+    return prases, spans, words
 
 
 class DistiLLMTrainer(Trainer):
@@ -249,8 +556,6 @@ class DistiLLMTrainer(Trainer):
         # Initialize this variable to False. This helps tracking the case when `peft_module_casting_to_bf16`
         # has been called in order to properly call autocast if needed.
         self._peft_has_been_casted_to_bf16 = False
-
-        model.resize_token_embeddings(ref_model.config.vocab_size)
 
         if force_use_ref_model:
             warnings.warn(
@@ -531,6 +836,20 @@ class DistiLLMTrainer(Trainer):
             args.dataset_num_proc = dataset_num_proc
         self.dataset_num_proc = args.dataset_num_proc
 
+        if args.model_type == 'gpt2':
+            teacher_hidden_size = self.ref_model.config.n_embd
+            student_hidden_size = model.config.n_embd
+        else:
+            teacher_hidden_size = self.ref_model.config.hidden_size
+            student_hidden_size = model.config.hidden_size
+
+        projector_list = nn.ModuleList()
+        for _ in range(len(args.teacher_layer_mapping)):
+            projector = nn.Linear(student_hidden_size, teacher_hidden_size)
+            projector = projector.to(model.device)
+            projector_list.append(projector)
+        model.projectors = projector_list
+
         # Compute that only on the main process for faster data processing.
         # see: https://github.com/huggingface/trl/pull/1255
         with PartialState().local_main_process_first():
@@ -542,8 +861,6 @@ class DistiLLMTrainer(Trainer):
                     self.tokenize_row, num_proc=self.dataset_num_proc, 
                     writer_batch_size=10, load_from_cache_file=False
                 )
-        # projectors có thể không dùng trong warmup steps
-        args.ddp_find_unused_parameters = True
         super().__init__(
             model=model,
             args=args,
@@ -600,70 +917,19 @@ class DistiLLMTrainer(Trainer):
         
         self.ref_model.eval()
 
-# ═══ NNM additions ═══
-        self.nnm_target     = getattr(args, "nnm_target", "chosen")
-        self.nnm_lambda     = getattr(args, "nnm_lambda", 0.1)
-        self.nnm_K          = getattr(args, "nnm_K_centroids", 128)
-        self.nnm_d_prime    = getattr(args, "nnm_d_prime", 256)
-        self.nnm_ns_iters   = getattr(args, "nnm_ns_iters", 5)
-        self.nnm_warmup     = getattr(args, "nnm_warmup", 100)
-        self.nnm_chosen_w   = getattr(args, "nnm_chosen_weight", 1.0)
-        self.nnm_rejected_w = getattr(args, "nnm_rejected_weight", 0.5)
-        self.nnm_n_mid      = getattr(args, "nnm_n_mid_layers", 4)
-        self.nnm_centroid_batches = getattr(args, "nnm_centroid_batches", 500)
+        self.nlp = spacy.load("en_core_web_sm")
+        self.matcher = Matcher(self.nlp.vocab)
+        VERB_PHRASE_PATTERN = [
+            {"POS": "AUX", "OP": "*"},
+            {"POS": "ADV", "OP": "*"},
+            {"POS": "VERB", "OP": "+"},
+            {"POS": "ADV", "OP": "*"},
+        ]
 
-        # Layer mapping — auto-pick 40-85% if not provided
-        L_s = model.config.num_hidden_layers
-        L_t = self.ref_model.config.num_hidden_layers
-        self.nnm_s_layers = getattr(args, "nnm_student_layer_mapping", None) or select_mid_layers(L_s, self.nnm_n_mid)
-        self.nnm_t_layers = getattr(args, "nnm_teacher_layer_mapping", None) or select_mid_layers(L_t, self.nnm_n_mid)
-        if len(self.nnm_s_layers) != len(self.nnm_t_layers):
-            raise ValueError(
-                f"NNM student/teacher layer mapping length mismatch: "
-                f"{self.nnm_s_layers} vs {self.nnm_t_layers}"
-            )
-
-        # Layer weights (Gaussian centered at middle layer)
-        self.nnm_layer_weights = {
-            s_lid: layer_weight(s_lid, L_s, sigma=0.15)
-            for s_lid in self.nnm_s_layers
-        }
-
-        # Build per-layer projector (Linear d_s -> d_t)
-        d_s = model.config.hidden_size
-        d_t = self.ref_model.config.hidden_size
-        projector_list = nn.ModuleList([
-            nn.Linear(d_s, d_t, bias=True).to(model.device)
-            for _ in self.nnm_s_layers
-        ])
-        # Lưu projectors riêng, KHÔNG attach vào DDP model
-        self.projectors = projector_list.to(model.device)
-
-        # Pre-compute teacher centroids (1-time)
-        if self.nnm_lambda > 0 and not getattr(self, "_nnm_centroids_built", False):
-            print(f"[NNM] Building teacher centroids "
-                  f"(layers={self.nnm_s_layers}, K={self.nnm_K}, max_batches={self.nnm_centroid_batches})...")
-            train_dl = self.get_train_dataloader()
-            self._nnm_centroids = build_teacher_centroids(
-                teacher=self.ref_model,
-                dataloader=train_dl,
-                student_layer_mapping=self.nnm_s_layers,
-                teacher_layer_mapping=self.nnm_t_layers,
-                K=self.nnm_K,
-                max_batches=self.nnm_centroid_batches,
-                device=self.accelerator.device,
-            )
-            self._nnm_R = make_R(d_t, self.nnm_d_prime, self.accelerator.device)
-            self._nnm_centroids_built = True
-            print(f"[NNM] ✓ Centroids built for layers {list(self._nnm_centroids.keys())}")
-        else:
-            self._nnm_centroids = None
-            self._nnm_R = None
+        self.matcher.add("VERB_PHRASE", [VERB_PHRASE_PATTERN])
 
     
     def create_optimizer(self):
-        proj_lr = getattr(self.args, 'proj_lr', -1.0)
-
         opt_model = self.model_wrapped if is_sagemaker_mp_enabled() else self.model
         if self.args.proj_lr < 0: self.args.proj_lr = self.args.learning_rate
 
@@ -685,7 +951,7 @@ class DistiLLMTrainer(Trainer):
                     ],
                     "weight_decay": 0.0,
                 },
-                {"params": self.projectors.parameters(), "lr": proj_lr}
+                {"params": self.model.projectors.parameters(), "lr": self.args.proj_lr}
             ]
 
             optimizer_cls, optimizer_kwargs = self.get_optimizer_cls_and_kwargs(self.args, opt_model)
@@ -1412,13 +1678,11 @@ class DistiLLMTrainer(Trainer):
         # if self.is_vision_model:
         #     model_kwargs["pixel_values"] = concatenated_batch["pixel_values"]
         
-        need_hiddens = self.nnm_lambda > 0 and self._nnm_centroids is not None
         student_outputs = model(
             concatenated_batch["concatenated_input_ids"],
             attention_mask=concatenated_batch["concatenated_attention_mask"],
-            use_cache=False,
-            output_hidden_states=need_hiddens,
-            return_dict=True,
+            use_cache=False, return_dict=True,
+            output_hidden_states=True,
             **model_kwargs,
         )
         all_logits = student_outputs.logits
@@ -1433,9 +1697,8 @@ class DistiLLMTrainer(Trainer):
             teacher_outputs = ref_model(
                 concatenated_batch["concatenated_input_ids"],
                 attention_mask=concatenated_batch["concatenated_attention_mask"],
-                use_cache=False,
-                output_hidden_states=need_hiddens,
-                return_dict=True,
+                use_cache=False, return_dict=True,
+                output_hidden_states=True,
                 **model_kwargs,
             )
 
@@ -1469,37 +1732,19 @@ class DistiLLMTrainer(Trainer):
         else:
             rejected_pos_kl = tea_pos_kl[len_chosen:]
 
-        # Dummy để projectors không bị unused khi warmup
-        dummy = sum(p.sum() * 0 for p in self.projectors.parameters())
-        nnm_loss = dummy
-        if need_hiddens:
-            step = self.state.global_step if hasattr(self, 'state') and self.state is not None else 0
-            warmup_factor = min(1.0, step / max(1, self.nnm_warmup))
-            nnm_lam = self.nnm_lambda * warmup_factor
+        input_texts = self.tokenizer.batch_decode(concatenated_batch["concatenated_input_ids"], skip_special_tokens=False)
+        offsets_mapping = self.tokenizer(input_texts, return_offsets_mapping=True, padding=True, truncation=True, 
+                                         max_length=self.args.max_length, add_special_tokens=False, return_tensors='pt')['offset_mapping']
+        prases_offsets, spans_offsets, words_offsets = get_spans_offsets(input_texts, self.nlp, self.matcher)
 
-            if nnm_lam > 0:
-                unwrapped = self.accelerator.unwrap_model(model)
-                nnm_loss = compute_nnm_loss(
-                    projectors=self.projectors,
-                    s_hidden_states=student_outputs.hidden_states,
-                    t_hidden_states=teacher_outputs.hidden_states,
-                    labels=concatenated_batch["concatenated_labels"],
-                    chosen_size=len_chosen,
-                    student_layer_mapping=self.nnm_s_layers,
-                    teacher_layer_mapping=self.nnm_t_layers,
-                    t_centroids=self._nnm_centroids,
-                    R=self._nnm_R,
-                    layer_weights=self.nnm_layer_weights,
-                    target=self.nnm_target,
-                    ns_iters=self.nnm_ns_iters,
-                    chosen_weight=self.nnm_chosen_w,
-                    rejected_weight=self.nnm_rejected_w,
-                )
-                nnm_loss = nnm_lam * nnm_loss
-            else:
-                dummy = sum(p.sum() * 0 for p in self.projectors.parameters())
-                nnm_loss = dummy
-        return chosen_logps, rejected_logps, tea_chosen_logps, tea_rejected_logps, chosen_pos_kl, rejected_pos_kl, nnm_loss
+        span_loss = compute_overall_span_loss(self.model.projectors, concatenated_batch["concatenated_attention_mask"], 
+                                              student_outputs.hidden_states, teacher_outputs.hidden_states, 
+                                              offsets_mapping, prases_offsets, spans_offsets, words_offsets, self.args)
+
+        span_loss = self.args.w_span_loss * span_loss
+        # span_loss = 0.0
+
+        return chosen_logps, rejected_logps, tea_chosen_logps, tea_rejected_logps, chosen_pos_kl, rejected_pos_kl, span_loss
 
     def get_batch_loss_metrics(
         self,
@@ -1512,26 +1757,24 @@ class DistiLLMTrainer(Trainer):
 
         forward_output = self.concatenated_forward(model, self.ref_model, batch)
         (
-            policy_chosen_logps, policy_rejected_logps,
-            reference_chosen_logps, reference_rejected_logps,
-            chosen_position_kl, rejected_position_kl,
-            nnm_loss,
-        ) = forward_output[:7]
+            policy_chosen_logps, policy_rejected_logps, reference_chosen_logps, reference_rejected_logps,
+            chosen_position_kl, rejected_position_kl, span_loss, *_
+        ) = forward_output[:8]
 
         losses = self.kd_loss(
             policy_chosen_logps, policy_rejected_logps,
             reference_chosen_logps, reference_rejected_logps,
             chosen_position_kl, rejected_position_kl
         )
-        # Add NNM term
-        losses = losses.mean() + nnm_loss
+
+        losses = losses.mean() + span_loss
 
         prefix = "eval_" if train_eval == "eval" else ""
         metrics[f"{prefix}logqs/rejected"] = policy_rejected_logps.detach().mean().cpu()
         metrics[f"{prefix}logqs/chosen"] = policy_chosen_logps.detach().mean().cpu()
         metrics[f"{prefix}logqs_logps/rejected"] = (policy_rejected_logps.exp() - reference_rejected_logps.exp()).detach().mean().cpu()
         metrics[f"{prefix}logps_logqs/chosen"] = (reference_chosen_logps.exp() - policy_chosen_logps.exp()).detach().mean().cpu()
-        metrics[f"{prefix}nnm_loss"] = nnm_loss.detach().cpu()
+
         return losses, metrics
 
     def compute_loss(
@@ -1539,9 +1782,7 @@ class DistiLLMTrainer(Trainer):
         model: Union[PreTrainedModel, nn.Module],
         inputs: Dict[str, Union[torch.Tensor, Any]],
         return_outputs=False,
-        num_items_in_batch=None,
     ) -> Union[torch.Tensor, Tuple[torch.Tensor, Dict[str, torch.Tensor]]]:
-
         if not self.use_dpo_data_collator:
             warnings.warn(
                 "compute_loss is only implemented for DPODataCollatorWithPadding, and you passed a datacollator that is different than "
@@ -1702,7 +1943,7 @@ class DistiLLMTrainer(Trainer):
 
         return initial_output
 
-    def log(self, logs: Dict[str, float], start_time: float = None) -> None:
+    def log(self, logs: Dict[str, float]) -> None:
         """
         Log `logs` on the various objects watching training, including stored metrics.
 
@@ -1721,7 +1962,7 @@ class DistiLLMTrainer(Trainer):
             if self.logq_logp is None:
                 self.logq_logp = self._stored_metrics['logqs_logps/rejected']
         del self._stored_metrics[train_eval]
-        return super().log(logs, start_time) if start_time is not None else super().log(logs)
+        return super().log(logs)
 
     @wraps(Trainer.push_to_hub)
     def push_to_hub(self, commit_message: Optional[str] = "End of training", blocking: bool = True, **kwargs) -> str:
