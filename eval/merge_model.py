@@ -6,6 +6,11 @@ import torch
 from transformers import AutoModelForCausalLM, AutoTokenizer
 from peft import PeftModel
 
+import os
+import safetensors.torch as st
+
+
+
 
 def parse_args():
     parser = argparse.ArgumentParser(
@@ -41,11 +46,27 @@ def main():
 
     print(f"Loading base model: {args.base_model}")
 
+    adapter_bin = os.path.join(args.adapter, "adapter_model.bin")
+    adapter_safe = os.path.join(args.adapter, "adapter_model.safetensors")
+
+    if os.path.exists(adapter_safe):
+        adapter_weights = st.load_file(adapter_safe)
+    else:
+        adapter_weights = torch.load(adapter_bin, map_location="cpu")
+
+    vocab_size = adapter_weights[
+        "base_model.model.model.embed_tokens.weight"
+    ].shape[0]
+
+    print(f"Detected vocab size from adapter: {vocab_size}")
+
     base_model = AutoModelForCausalLM.from_pretrained(
         args.base_model,
         torch_dtype=torch.float16,
         trust_remote_code=True,
     )
+
+    base_model.resize_token_embeddings(vocab_size)
 
     print(f"Loading adapter: {args.adapter}")
 
