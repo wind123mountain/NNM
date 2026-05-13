@@ -303,6 +303,8 @@ class DistiLLMTrainer(Trainer):
         # has been called in order to properly call autocast if needed.
         self._peft_has_been_casted_to_bf16 = False
 
+        model.resize_token_embeddings(ref_model.config.vocab_size)
+
         if force_use_ref_model:
             warnings.warn(
                 "You passed `force_use_ref_model` to the DPOTrainer, the value you passed will override the one in the `DPOConfig`."
