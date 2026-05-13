@@ -1,10 +1,5 @@
 #!/bin/bash
 
-cd llm-evaluation-harness
-pip install -e ".[math,ifeval,sentencepiece]"
-pip install langdetect immutabledict   # cho IFEval
-cd ..
-
 CKPT_DIR="./ckpts"
 INCLUDE_PATH="custom_tasks/"
 
