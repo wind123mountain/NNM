@@ -40,7 +40,7 @@ max_length: 1024
 max_prompt_length: 512
 num_train_epochs: 1
 optim: adamw_torch
-output_dir: ./outputs/qwen2.5-1.5B-it-nnm-1epoch
+output_dir: ./outputs/qwen2.5-1.5B-it-nnm-1epoch_2
 run_name: qwen2.5-1.5B-it-nnm
 per_device_train_batch_size: 2
 per_device_eval_batch_size: 2
@@ -60,7 +60,7 @@ nnm_lambda: 0.05
 nnm_K_centroids: 128
 nnm_d_prime: 256
 nnm_ns_iters: 5
-nnm_warmup: 100
+nnm_warmup: 400
 nnm_n_mid_layers: 4
 nnm_chosen_weight: 1.0
 nnm_rejected_weight: 1.0
