@@ -80,25 +80,34 @@ run_eval() {
     echo "[$(date '+%Y-%m-%d %H:%M:%S')] === Xong: ${LABEL} ==="
 }
 
-hf download VoCuc/nnm --include "llama-3.2-3B-it-sft/checkpoint-1911/*" \
-    --local-dir "outputs"
+
+# python eval/merge_model.py \
+#   --base_model meta-llama/Llama-3.2-3B-Instruct \
+#   --adapter outputs/llama-3.2-3B-it-sft/checkpoint-1911 \
+#   --output outputs/llama-3.2-3B-it-sft/checkpoint-1911
+
+# python eval/merge_model.py \
+#   --base_model meta-llama/Llama-3.2-3B-Instruct \
+#   --adapter outputs/llama-3.2-3B-it-nnm-1epoch/checkpoint-2492 \
+#   --output outputs/llama-3.2-3B-it-nnm-1epoch/checkpoint-2492
+
+# run_eval \
+#     "llama-3.2-3B-it-sft-checkpoint-1911" \
+#     "pretrained=outputs/llama-3.2-3B-it-sft/checkpoint-1911,tensor_parallel_size=${TP},dtype=float16,gpu_memory_utilization=0.85,trust_remote_code=True"
+
+# run_eval \
+#     "llama-3.2-3B-it-nnm-1epoch-checkpoint-2492" \
+#     "pretrained=outputs/llama-3.2-3B-it-nnm-1epoch/checkpoint-2492,tensor_parallel_size=${TP},dtype=float16,gpu_memory_utilization=0.85,trust_remote_code=True"
 
 python eval/merge_model.py \
-  --base_model meta-llama/Llama-3.2-3B-Instruct \
-  --adapter outputs/llama-3.2-3B-it-sft/checkpoint-1911 \
-  --output outputs/llama-3.2-3B-it-sft/checkpoint-1911
-
-python eval/merge_model.py \
-  --base_model meta-llama/Llama-3.2-3B-Instruct \
-  --adapter outputs/llama-3.2-3B-it-nnm-1epoch/checkpoint-2492 \
-  --output outputs/llama-3.2-3B-it-nnm-1epoch/checkpoint-2492
+  --base_model Qwen/Qwen2.5-1.5B-Instruct \
+  --adapter outputs/qwen2.5-1.5B-it-nnm-1epoch/checkpoint-2492 \
+  --output outputs/qwen2.5-1.5B-it-nnm-1epoch/checkpoint-2492
 
 run_eval \
-    "llama-3.2-3B-it-sft-checkpoint-1911" \
-    "pretrained=outputs/llama-3.2-3B-it-sft/checkpoint-1911,tensor_parallel_size=${TP},dtype=float16,gpu_memory_utilization=0.85,trust_remote_code=True"
+    "qwen2.5-1.5B-it-sft-checkpoint-2492" \
+    "pretrained=outputs/qwen2.5-1.5B-it-nnm-1epoch/checkpoint-2492,tensor_parallel_size=${TP},dtype=float16,gpu_memory_utilization=0.85,trust_remote_code=True"
 
-run_eval \
-    "llama-3.2-3B-it-nnm-1epoch-checkpoint-2492" \
-    "pretrained=outputs/llama-3.2-3B-it-nnm-1epoch/checkpoint-2492,tensor_parallel_size=${TP},dtype=float16,gpu_memory_utilization=0.85,trust_remote_code=True"
+
 
 echo "=== Done ==="
