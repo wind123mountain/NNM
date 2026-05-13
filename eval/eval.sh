@@ -19,7 +19,7 @@ MODEL_NAME="/home/hungpv/projects/NND/outputs/qwen2.5-math-nnm/checkpoint-4984"
 # SUBFOLDER="checkpoint-1140"   # nếu model huggingface có subfolder chứa pytorch_model.bin, set tên subfolder này; nếu không có subfolder, set SUBFOLDER="" (empty string)
 #MODEL_NAME="Qwen/Qwen2.5-Math-1.5B-Instruct"
 TOKENIZER="/home/hungpv/projects/NND/outputs/qwen2.5-math-nnm/checkpoint-4984"   # nếu tokenizer cùng tên với model, set giống MODEL_NAME; nếu tokenizer khác tên hoặc có subfolder khác, set tên/tokenizer path ở đây
-DEVICE="cuda"
+DEVICE="cuda: 1"
 DTYPE="bfloat16"
 BATCH="32"           # 'auto' để lm-eval tự chỉnh; hoặc set 32, 16, ...
 OUT_DIR="results/distillm2-nnm"

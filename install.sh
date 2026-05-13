@@ -1,3 +1,5 @@
+pip install uv
+
 if [ ! -f ".venv/bin/activate" ]; then
     uv venv --seed
 fi
