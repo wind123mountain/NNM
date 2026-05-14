@@ -177,6 +177,13 @@ def compute_nnm_loss(
 
         d_s = s_h.shape[-1]
         d_t = t_h.shape[-1]
+        # Cast input to projector dtype to avoid mat1/mat2 dtype mismatch.
+        # This happens when model is loaded in bf16 but some hidden states
+        # (e.g. embedding output, final RMSNorm output) come back as fp32,
+        # while projector weights were initialised from model dtype (bf16).
+        # We cast at call site rather than upfront to only touch the masked
+        # slice and not materialise a full-sequence cast tensor.
+        proj_dtype = projector.weight.dtype
         s_flat = s_h.reshape(-1, d_s)
         t_flat = t_h.reshape(-1, d_t)
 
@@ -184,7 +191,7 @@ def compute_nnm_loss(
             mask = label_mask.reshape(-1)
             if not mask.any():
                 continue
-            s_proj = projector(s_flat[mask])
+            s_proj = projector(s_flat[mask].to(proj_dtype))
             t_act  = t_flat[mask]
             total_loss = total_loss + nnm_loss_one_layer(s_proj, t_act, C_t, R, lw, ns_iters)
 
@@ -194,7 +201,7 @@ def compute_nnm_loss(
             mask = mask.reshape(-1)
             if not mask.any():
                 continue
-            s_proj = projector(s_flat[mask])
+            s_proj = projector(s_flat[mask].to(proj_dtype))
             t_act  = t_flat[mask]
             total_loss = total_loss + nnm_loss_one_layer(s_proj, t_act, C_t, R, lw, ns_iters)
 
@@ -204,13 +211,13 @@ def compute_nnm_loss(
             mc = mc.reshape(-1); mr = mr.reshape(-1)
 
             if mc.any():
-                s_proj_c = projector(s_flat[mc])
+                s_proj_c = projector(s_flat[mc].to(proj_dtype))
                 t_act_c  = t_flat[mc]
                 total_loss = total_loss + chosen_weight * nnm_loss_one_layer(
                     s_proj_c, t_act_c, C_t, R, lw, ns_iters,
                 )
             if mr.any():
-                s_proj_r = projector(s_flat[mr])
+                s_proj_r = projector(s_flat[mr].to(proj_dtype))
                 t_act_r  = t_flat[mr]
                 total_loss = total_loss + rejected_weight * nnm_loss_one_layer(
                     s_proj_r, t_act_r, C_t, R, lw, ns_iters,
@@ -240,6 +247,13 @@ def build_teacher_centroids(
     """
     Pre-compute teacher centroids in TEACHER hidden space (d_t).
     Returns dict: s_lid -> frozen [K, d_t] tensor.
+
+    NOTE (Bug #8 fix): hidden states are filtered with the LABEL mask
+    (`chosen_labels != -100`) — i.e. response tokens only — so the centroid
+    distribution matches the hidden distribution that NNM loss compares
+    against at training time. Falling back to attention_mask only when
+    labels are absent (this introduces prompt-token bias but is better
+    than skipping the batch).
     """
     from tqdm import tqdm
 
@@ -263,21 +277,54 @@ def build_teacher_centroids(
         for s_lid in student_layer_mapping
     }
 
+    used_label_mask = False
+    used_attn_mask_fallback = False
+
     for i, batch in enumerate(tqdm(dataloader, desc="NNM teacher centroid pre-pass", total=max_batches)):
         if i >= max_batches:
             break
-        ids  = batch.get("chosen_input_ids", batch.get("input_ids"))
-        mask = batch.get("chosen_attention_mask", batch.get("attention_mask"))
+        ids   = batch.get("chosen_input_ids",      batch.get("input_ids"))
+        mask  = batch.get("chosen_attention_mask", batch.get("attention_mask"))
+        # ═══ FIX BUG #8: prefer label mask (response tokens only) ═══
+        labels = batch.get("chosen_labels", batch.get("labels"))
+
         if ids is None or mask is None:
             continue
-        ids = ids.to(device)
+        ids  = ids.to(device)
         mask = mask.to(device)
 
+        # Forward pass uses the attention_mask (so padding is ignored inside
+        # the transformer); the mask we use to *select* hidden positions for
+        # centroid updates is the label mask if available.
         out = teacher(ids, attention_mask=mask, output_hidden_states=True, return_dict=True)
-        flat_mask = mask.reshape(-1).bool()
+
+        if labels is not None:
+            labels = labels.to(device)
+            # Shape check: in some collators chosen_labels may be a list of lists
+            # converted to tensor with the same shape as ids; if shapes mismatch
+            # we degrade to attention_mask rather than crash.
+            if labels.shape == ids.shape:
+                flat_mask = (labels.reshape(-1) != -100)
+                used_label_mask = True
+            else:
+                flat_mask = mask.reshape(-1).bool()
+                used_attn_mask_fallback = True
+        else:
+            flat_mask = mask.reshape(-1).bool()
+            used_attn_mask_fallback = True
+
+        if not flat_mask.any():
+            continue
 
         for s_lid, t_lid in zip(student_layer_mapping, teacher_layer_mapping):
             h = out.hidden_states[t_lid].reshape(-1, d_t)[flat_mask]
             centroids[s_lid].update(h)
+
+    if used_attn_mask_fallback and not used_label_mask:
+        print("[NNM] WARNING: chosen_labels not found in dataloader; "
+              "centroids were built using attention_mask (includes prompt tokens). "
+              "This biases centroids vs. training-time NNM mask.")
+    elif used_attn_mask_fallback:
+        print("[NNM] NOTE: some batches fell back to attention_mask due to shape mismatch.")
 
     return {s_lid: rc.C.detach().clone() for s_lid, rc in centroids.items()}

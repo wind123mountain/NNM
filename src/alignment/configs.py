@@ -289,6 +289,7 @@ class DPOConfig(trl.DPOConfig):
     # ═══ NNM fields ═══
     nnm_lambda: float = field(default=0)
     nnm_K_centroids: int = field(default=128)
+    nnm_delay: int = field(default=200)
     nnm_d_prime: int = field(default=256)
     nnm_ns_iters: int = field(default=5)
     nnm_warmup: int = field(default=100)

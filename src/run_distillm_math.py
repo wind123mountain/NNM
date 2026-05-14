@@ -185,7 +185,7 @@ def main():
         model_kwargs = None
 
     if model_args.ref_model_name_or_path is None:
-        ref_model = model
+        ref_model = None
     else:
         ref_model = model_args.ref_model_name_or_path
     ref_model_kwargs = model_kwargs

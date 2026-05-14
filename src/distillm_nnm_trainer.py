@@ -542,7 +542,87 @@ class DistiLLMTrainer(Trainer):
                     self.tokenize_row, num_proc=self.dataset_num_proc, 
                     writer_batch_size=10, load_from_cache_file=False
                 )
-        # projectors có thể không dùng trong warmup steps
+
+        # ════════════════════════════════════════════════════════════════
+        # NNM init — làm TRƯỚC super().__init__() để các attribute đã sẵn
+        # sàng cho mọi code path mà super-init có thể trigger
+        # (vd. precompute_ref_log_probs gọi concatenated_forward).
+        #
+        # LƯU Ý về DDP (Bug #2 — bản fix v2):
+        # Ban đầu mình định attach `model.projectors = projector_list` để
+        # accelerate DDP-wrap chung với model. Nhưng cách đó VẪN SAI: DDP
+        # gọi `Reducer.prepare_for_backward(output)` ở CUỐI `model.forward()`
+        # để traverse autograd graph và xác định param "used"/"unused".
+        # Projectors được gọi BÊN NGOÀI `model.forward()` (trong
+        # `compute_nnm_loss`), nên tại thời điểm đó chúng KHÔNG nằm trong
+        # graph → DDP đánh dấu "unused" → đặt grad = 0 và fire all-reduce
+        # bucket ngay. Sau đó autograd vẫn tính grad từ nnm_loss vào
+        # `param.grad` local, nhưng all-reduce đã xong → grad mỗi rank KHÁC
+        # nhau → mô hình phân kỳ. `find_unused_parameters=True` KHÔNG cứu
+        # được trường hợp này, nó chỉ xử lý param thực sự không có grad.
+        #
+        # Vì vậy: KHÔNG attach vào model. Giữ projectors là module riêng,
+        # và đồng bộ gradient thủ công bằng all-reduce trong `training_step`.
+        # Math đúng kể cả với gradient accumulation:
+        #   sum_k avg_r(g_k_r) = avg_r(sum_k g_k_r)
+        # (xem comment ở `training_step`).
+        # ════════════════════════════════════════════════════════════════
+        self.nnm_target     = getattr(args, "nnm_target", "concatenated")
+        self.nnm_lambda     = getattr(args, "nnm_lambda", 0.1)
+        self.nnm_K          = getattr(args, "nnm_K_centroids", 128)
+        self.nnm_d_prime    = getattr(args, "nnm_d_prime", 256)
+        self.nnm_ns_iters   = getattr(args, "nnm_ns_iters", 5)
+        self.nnm_warmup     = getattr(args, "nnm_warmup", 100)
+        self.nnm_chosen_w   = getattr(args, "nnm_chosen_weight", 1.0)
+        self.nnm_rejected_w = getattr(args, "nnm_rejected_weight", 0.5)
+        self.nnm_n_mid      = getattr(args, "nnm_n_mid_layers", 4)
+        self.nnm_centroid_batches = getattr(args, "nnm_centroid_batches", 500)
+
+        # Layer mapping — auto-pick 40-85% if not provided
+        L_s = model.config.num_hidden_layers
+        L_t = self.ref_model.config.num_hidden_layers
+        self.nnm_s_layers = getattr(args, "nnm_student_layer_mapping", None) or select_mid_layers(L_s, self.nnm_n_mid)
+        self.nnm_t_layers = getattr(args, "nnm_teacher_layer_mapping", None) or select_mid_layers(L_t, self.nnm_n_mid)
+        if len(self.nnm_s_layers) != len(self.nnm_t_layers):
+            raise ValueError(
+                f"NNM student/teacher layer mapping length mismatch: "
+                f"{self.nnm_s_layers} vs {self.nnm_t_layers}"
+            )
+
+        # Layer weights (Gaussian centered at middle layer)
+        self.nnm_layer_weights = {
+            s_lid: layer_weight(s_lid, L_s, sigma=0.15)
+            for s_lid in self.nnm_s_layers
+        }
+
+        # Build per-layer projector (Linear d_s -> d_t) — match model dtype
+        d_s = model.config.hidden_size
+        d_t = self.ref_model.config.hidden_size
+        try:
+            model_dtype = next(model.parameters()).dtype
+        except StopIteration:
+            model_dtype = torch.float32
+        projector_list = nn.ModuleList([
+            nn.Linear(d_s, d_t, bias=True)
+            for _ in self.nnm_s_layers
+        ]).to(device=model.device, dtype=model_dtype)
+
+        # IMPORTANT: do NOT attach to `model` (see big comment above).
+        # Projectors live as a separate module on this Trainer instance.
+        # Gradient synchronization is handled manually in `training_step`.
+        self.projectors = projector_list
+
+        # Centroids must be initialised BEFORE super().__init__() in case
+        # precompute_ref_log_probs=True triggers concatenated_forward via
+        # get_train_dataloader during the super-init's data-related setup.
+        self._nnm_centroids = None
+        self._nnm_R = None
+        self._nnm_centroids_built = False
+
+        # Keep True for safety: some model paths (gradient checkpointing,
+        # PEFT adapters, vision branch) can produce genuinely unused params.
+        # Note: projectors are NO LONGER inside model, so they're not the
+        # reason — see big comment above for why we kept them external.
         args.ddp_find_unused_parameters = True
         super().__init__(
             model=model,
@@ -600,47 +680,13 @@ class DistiLLMTrainer(Trainer):
         
         self.ref_model.eval()
 
-# ═══ NNM additions ═══
-        self.nnm_target     = getattr(args, "nnm_target", "concatenated")
-        self.nnm_lambda     = getattr(args, "nnm_lambda", 0.1)
-        self.nnm_K          = getattr(args, "nnm_K_centroids", 128)
-        self.nnm_d_prime    = getattr(args, "nnm_d_prime", 256)
-        self.nnm_ns_iters   = getattr(args, "nnm_ns_iters", 5)
-        self.nnm_warmup     = getattr(args, "nnm_warmup", 100)
-        self.nnm_chosen_w   = getattr(args, "nnm_chosen_weight", 1.0)
-        self.nnm_rejected_w = getattr(args, "nnm_rejected_weight", 0.5)
-        self.nnm_n_mid      = getattr(args, "nnm_n_mid_layers", 4)
-        self.nnm_centroid_batches = getattr(args, "nnm_centroid_batches", 500)
+        # Move projectors to accelerator device (may differ from initial
+        # `model.device` after accelerate.prepare, e.g. with device_map).
+        self.projectors = self.projectors.to(self.accelerator.device)
 
-        # Layer mapping — auto-pick 40-85% if not provided
-        L_s = model.config.num_hidden_layers
-        L_t = self.ref_model.config.num_hidden_layers
-        self.nnm_s_layers = getattr(args, "nnm_student_layer_mapping", None) or select_mid_layers(L_s, self.nnm_n_mid)
-        self.nnm_t_layers = getattr(args, "nnm_teacher_layer_mapping", None) or select_mid_layers(L_t, self.nnm_n_mid)
-        if len(self.nnm_s_layers) != len(self.nnm_t_layers):
-            raise ValueError(
-                f"NNM student/teacher layer mapping length mismatch: "
-                f"{self.nnm_s_layers} vs {self.nnm_t_layers}"
-            )
-
-        # Layer weights (Gaussian centered at middle layer)
-        self.nnm_layer_weights = {
-            s_lid: layer_weight(s_lid, L_s, sigma=0.15)
-            for s_lid in self.nnm_s_layers
-        }
-
-        # Build per-layer projector (Linear d_s -> d_t)
-        d_s = model.config.hidden_size
-        d_t = self.ref_model.config.hidden_size
-        projector_list = nn.ModuleList([
-            nn.Linear(d_s, d_t, bias=True).to(model.device)
-            for _ in self.nnm_s_layers
-        ])
-        # Lưu projectors riêng, KHÔNG attach vào DDP model
-        self.projectors = projector_list.to(model.device)
-
-        # Pre-compute teacher centroids (1-time)
-        if self.nnm_lambda > 0 and not getattr(self, "_nnm_centroids_built", False):
+        # Pre-compute teacher centroids (1-time) — must come AFTER super().__init__()
+        # because we need self.accelerator and self.get_train_dataloader.
+        if self.nnm_lambda > 0 and not self._nnm_centroids_built:
             print(f"[NNM] Building teacher centroids "
                   f"(layers={self.nnm_s_layers}, K={self.nnm_K}, max_batches={self.nnm_centroid_batches})...")
             train_dl = self.get_train_dataloader()
@@ -653,19 +699,26 @@ class DistiLLMTrainer(Trainer):
                 max_batches=self.nnm_centroid_batches,
                 device=self.accelerator.device,
             )
+            if self.accelerator.num_processes > 1 and torch.distributed.is_initialized():
+                for k in sorted(self._nnm_centroids.keys()):
+                    torch.distributed.broadcast(self._nnm_centroids[k], src=0)
             self._nnm_R = make_R(d_t, self.nnm_d_prime, self.accelerator.device)
             self._nnm_centroids_built = True
             print(f"[NNM] ✓ Centroids built for layers {list(self._nnm_centroids.keys())}")
-        else:
-            self._nnm_centroids = None
-            self._nnm_R = None
 
     
     def create_optimizer(self):
-        proj_lr = getattr(self.args, 'proj_lr', -1.0)
+        # ═══ FIX BUG #1: resolve proj_lr safely. Before, `proj_lr` was read
+        # BEFORE `self.args.proj_lr` was patched, so the optimizer received
+        # the stale -1.0 (and would silently turn projector descent into
+        # ascent). Also `self.args.proj_lr < 0` raised AttributeError when
+        # the attribute didn't exist at all. ═══
+        proj_lr = getattr(self.args, 'proj_lr', None)
+        if proj_lr is None or proj_lr < 0:
+            proj_lr = self.args.learning_rate
+        self.args.proj_lr = proj_lr  # write back for logging / downstream
 
         opt_model = self.model_wrapped if is_sagemaker_mp_enabled() else self.model
-        if self.args.proj_lr < 0: self.args.proj_lr = self.args.learning_rate
 
         if self.optimizer is None:
             projector_param = ['projectors', 'projector']
@@ -685,7 +738,7 @@ class DistiLLMTrainer(Trainer):
                     ],
                     "weight_decay": 0.0,
                 },
-                {"params": self.projectors.parameters(), "lr": proj_lr}
+                {"params": list(self.projectors.parameters()), "lr": proj_lr}
             ]
 
             optimizer_cls, optimizer_kwargs = self.get_optimizer_cls_and_kwargs(self.args, opt_model)
@@ -1475,15 +1528,23 @@ class DistiLLMTrainer(Trainer):
             rejected_pos_kl = tea_pos_kl[len_chosen:]
 
         # Dummy để projectors không bị unused khi warmup
+        # (cũng giữ DDP hook trên projector params cho cả case nnm_lambda=0)
         dummy = sum(p.sum() * 0 for p in self.projectors.parameters())
         nnm_loss = dummy
         if need_hiddens:
             step = self.state.global_step if hasattr(self, 'state') and self.state is not None else 0
-            warmup_factor = min(1.0, step / max(1, self.nnm_warmup))
+            nnm_delay  = getattr(self.args, "nnm_delay", 200)   # 200 steps đầu = 0 hẳn
+            nnm_warmup = self.nnm_warmup                         # 100 steps warmup tiếp theo
+
+            if step < nnm_delay:
+                warmup_factor = 0.0
+            elif step < nnm_delay + nnm_warmup:
+                warmup_factor = (step - nnm_delay) / max(1, nnm_warmup)
+            else:
+                warmup_factor = 1.0
             nnm_lam = self.nnm_lambda * warmup_factor
 
             if nnm_lam > 0:
-                unwrapped = self.accelerator.unwrap_model(model)
                 nnm_loss = compute_nnm_loss(
                     projectors=self.projectors,
                     s_hidden_states=student_outputs.hidden_states,
@@ -1500,10 +1561,8 @@ class DistiLLMTrainer(Trainer):
                     chosen_weight=self.nnm_chosen_w,
                     rejected_weight=self.nnm_rejected_w,
                 )
-                nnm_loss = nnm_lam * nnm_loss
-            else:
-                dummy = sum(p.sum() * 0 for p in self.projectors.parameters())
-                nnm_loss = dummy
+                nnm_loss = nnm_lam * nnm_loss + dummy  # add dummy to keep all projector params in graph
+            # else: nnm_loss stays as `dummy`
         return chosen_logps, rejected_logps, tea_chosen_logps, tea_rejected_logps, chosen_pos_kl, rejected_pos_kl, nnm_loss
 
     def get_batch_loss_metrics(
@@ -1538,6 +1597,50 @@ class DistiLLMTrainer(Trainer):
         metrics[f"{prefix}logps_logqs/chosen"] = (reference_chosen_logps.exp() - policy_chosen_logps.exp()).detach().mean().cpu()
         metrics[f"{prefix}nnm_loss"] = nnm_loss.detach().cpu()
         return losses, metrics
+
+    def training_step(self, *args, **kwargs):
+        """
+        Override to manually all-reduce projector gradients across DDP ranks.
+
+        Because `self.projectors` lives outside the DDP-wrapped model
+        (intentionally — see big NNM comment in __init__), DDP's reducer
+        doesn't know about projector params and won't sync their gradients.
+        Without this, each rank would compute its own local projector
+        gradient from the NNM term, and `optimizer.step()` would diverge.
+
+        We sync after EVERY micro-step backward. With gradient accumulation
+        (N micro-steps), this gives N all-reduce calls per optimizer step
+        instead of 1, but projectors have few params (typically n_layers ×
+        d_s × d_t), so the overhead is negligible. Math is correct:
+
+            after step k: grad on rank r = sum_{j<=k} g_j_r
+            all-reduce avg:               = sum_{j<=k} avg_r(g_j_r)
+
+        At step N (end of accumulation):
+            grad = sum_{j<=N} avg_r(g_j_r) = avg_r( sum_{j<=N} g_j_r )
+
+        which is what we'd get from one all-reduce at the end.
+
+        DeepSpeed is skipped: the engine handles params it manages, but
+        projectors are NOT in the engine (because not attached to model).
+        DeepSpeed + NNM is currently unsupported — if you need it, attach
+        projectors to the model and rely on engine's reducer (you'll lose
+        gradient correctness on multi-GPU non-DeepSpeed; pick your poison).
+        """
+        loss = super().training_step(*args, **kwargs)
+
+        if (self.accelerator.num_processes > 1
+                and not self.is_deepspeed_enabled
+                and torch.distributed.is_available()
+                and torch.distributed.is_initialized()):
+            ws = self.accelerator.num_processes
+            for p in self.projectors.parameters():
+                if p.grad is not None:
+                    torch.distributed.all_reduce(
+                        p.grad, op=torch.distributed.ReduceOp.SUM
+                    )
+                    p.grad.div_(ws)
+        return loss
 
     def compute_loss(
         self,
