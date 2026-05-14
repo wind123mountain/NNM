@@ -180,3 +180,4 @@ uv.lock
 data/
 math-data/
 ckpts/
+bigcode-evaluation-harness/

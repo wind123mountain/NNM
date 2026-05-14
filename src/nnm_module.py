@@ -75,16 +75,26 @@ class RunningCentroids:
         eta = self.eta / (1 + 0.001 * self._step)
         dists = torch.cdist(H, self.C)
         assign = dists.argmin(dim=1)
-        for k in range(self.K):
-            mask = (assign == k)
-            if mask.any():
-                self.C[k] = (1 - eta) * self.C[k] + eta * H[mask].mean(0)
-                self.dead[k] = 0
-            else:
-                self.dead[k] += 1
-                if self.dead[k] >= self.T_dead:
-                    self.C[k] = H[random.randint(0, len(H) - 1)].clone()
-                    self.dead[k] = 0
+
+        counts = torch.zeros(self.K, device=self.device)
+        sums   = torch.zeros(self.K, self.d, device=self.device)
+        sums.scatter_add_(0, assign.unsqueeze(1).expand(-1, self.d), H)
+        counts.scatter_add_(0, assign, torch.ones(len(H), device=self.device))
+
+        active = counts > 0
+        self.C[active] = (1 - eta) * self.C[active] + eta * (sums[active] / counts[active].unsqueeze(1))
+
+        # Dead centroid tracking (vectorized)
+        self.dead[active] = 0
+        self.dead[~active] += 1
+
+        # Reset dead centroids bằng random sample từ H
+        dead_mask = self.dead >= self.T_dead
+        n_dead = dead_mask.sum().item()
+        if n_dead > 0:
+            indices = torch.randint(len(H), (n_dead,), device=self.device)
+            self.C[dead_mask] = H[indices]
+            self.dead[dead_mask] = 0
 
 
 # ═══════════════════════════════════════════════════════════════
@@ -100,7 +110,6 @@ def make_R(d: int, d_prime: int, device, seed: int = 42) -> torch.Tensor:
 def layer_weight(l: int, L: int, sigma: float = 0.15) -> float:
     return math.exp(-((l / L - 0.5) ** 2) / (2 * sigma ** 2))
     # return 1.0 if 0.4 <= l / L <= 0.85 else 0.5
-
 
 
 def select_mid_layers(n_layers: int, n_mid: int = 4) -> list:
@@ -131,14 +140,15 @@ def nnm_loss_one_layer(
     R        = R.float()
 
     M_s = torch.cat([C_t, H_s_proj], dim=0) @ R
-    M_t = torch.cat([C_t, H_t],      dim=0) @ R
-
     m, n = M_s.shape
     scale = math.sqrt(m * n)
-
     nn_s = nuclear_norm_ns(M_s, ns_iters) / scale
-    nn_t = (nuclear_norm_ns(M_t, ns_iters) / scale).detach()
-    return lw * (nn_s - nn_t) ** 2
+
+    with torch.no_grad():
+        M_t = torch.cat([C_t, H_t],      dim=0) @ R
+        nn_t = (nuclear_norm_ns(M_t, ns_iters) / scale).detach()
+
+    return lw * (torch.log(nn_s + 1e-8) - math.log(nn_t.item() + 1e-8)) ** 2
 
 
 # ═══════════════════════════════════════════════════════════════
@@ -168,6 +178,9 @@ def compute_nnm_loss(
         return total_loss
 
     label_mask = (labels != -100)
+    if target == "both":
+        mc = label_mask.clone(); mc[chosen_size:] = False; mc = mc.reshape(-1)
+        mr = label_mask.clone(); mr[:chosen_size] = False; mr = mr.reshape(-1)
 
     for s_lid, t_lid, projector in zip(student_layer_mapping, teacher_layer_mapping, projectors):
         s_h = s_hidden_states[s_lid]
@@ -177,12 +190,7 @@ def compute_nnm_loss(
 
         d_s = s_h.shape[-1]
         d_t = t_h.shape[-1]
-        # Cast input to projector dtype to avoid mat1/mat2 dtype mismatch.
-        # This happens when model is loaded in bf16 but some hidden states
-        # (e.g. embedding output, final RMSNorm output) come back as fp32,
-        # while projector weights were initialised from model dtype (bf16).
-        # We cast at call site rather than upfront to only touch the masked
-        # slice and not materialise a full-sequence cast tensor.
+
         proj_dtype = projector.weight.dtype
         s_flat = s_h.reshape(-1, d_s)
         t_flat = t_h.reshape(-1, d_t)
@@ -206,10 +214,6 @@ def compute_nnm_loss(
             total_loss = total_loss + nnm_loss_one_layer(s_proj, t_act, C_t, R, lw, ns_iters)
 
         elif target == "both":
-            mc = label_mask.clone(); mc[chosen_size:] = False
-            mr = label_mask.clone(); mr[:chosen_size] = False
-            mc = mc.reshape(-1); mr = mr.reshape(-1)
-
             if mc.any():
                 s_proj_c = projector(s_flat[mc].to(proj_dtype))
                 t_act_c  = t_flat[mc]

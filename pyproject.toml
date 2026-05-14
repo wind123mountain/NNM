@@ -38,6 +38,7 @@ dependencies = [
     "parameterized>=0.9.0",
     "rich",
     "torch==2.5.1+cu121"
+    "lm-eval"
 ]
 
 

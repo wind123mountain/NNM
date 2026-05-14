@@ -71,17 +71,11 @@ run_eval() {
         echo "Start: $(date)"
         echo "=========================================="
 
-        # echo ">>> [1/10] GSM8K"
-        # "${LM_EVAL}" "${BASE_ARGS[@]}" --tasks gsm8k --num_fewshot 5
+        echo ">>> [1/10] GSM8K"
+        "${LM_EVAL}" "${BASE_ARGS[@]}" --tasks gsm8k --num_fewshot 5
 
-        # echo ">>> [2/10] GSM-Plus"
-        # "${LM_EVAL}" "${BASE_ARGS[@]}" --tasks gsm_plus --num_fewshot 5
-
-        # echo ">>> [3/10] MATH Minerva"
-        # "${LM_EVAL}" "${BASE_ARGS[@]}" --tasks minerva_math500 --num_fewshot 4
-
-        # echo ">>> [4/10] MMLU-Pro-Math"
-        # "${LM_EVAL}" "${BASE_ARGS[@]}" --tasks mmlu_pro_math --num_fewshot 5
+        echo ">>> [3/10] MATH Minerva"
+        "${LM_EVAL}" "${BASE_ARGS[@]}" --tasks minerva_math500 --num_fewshot 4
 
         echo ">>> [5/10] MMLU-STEM"
         "${LM_EVAL}" "${BASE_ARGS[@]}" --tasks mmlu_stem --num_fewshot 5
@@ -89,17 +83,9 @@ run_eval() {
         echo ">>> [6/10] SciQ"
         "${LM_EVAL}" "${BASE_ARGS[@]}" --tasks sciq --num_fewshot 0
 
-        # echo ">>> [7/10] MBPP"
-        # "${LM_EVAL}" "${BASE_ARGS[@]}" --tasks mbpp --num_fewshot 3 --confirm_run_unsafe_code
+        echo ">>> [7/10] MBPP"
+        "${LM_EVAL}" "${BASE_ARGS[@]}" --tasks mbpp --num_fewshot 3 --confirm_run_unsafe_code
 
-        # echo ">>> [8/10] BBH"
-        # "${LM_EVAL}" "${BASE_ARGS[@]}" --tasks bbh_cot_fewshot --num_fewshot 3
-
-        # echo ">>> [9/10] MuSR"
-        # "${LM_EVAL}" "${BASE_ARGS[@]}" --tasks leaderboard_musr --num_fewshot 0
-
-        # echo ">>> [10/10] IFEval"
-        # "${LM_EVAL}" "${BASE_ARGS[@]}" --tasks leaderboard_ifeval --num_fewshot 0
 
         echo "=========================================="
         echo "DONE: ${LABEL} | $(date)"
