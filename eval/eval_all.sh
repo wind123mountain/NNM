@@ -143,13 +143,13 @@ run_eval \
     "qwen2.5-0.5B#amid-ab_pr_0.5_0.5_8_1e-4-7476" \
     "pretrained=${CKPT_DIR}/qwen2.5-0.5B#amid/ab_pr_0.5_0.5_8_1e-4/7476,tensor_parallel_size=${TP},dtype=float16,gpu_memory_utilization=0.85,trust_remote_code=True"
 
-run_eval \
-    "llama3.2-3B-Instruct#amid-ab_pr_0.5_0.5_4_1e-4-7476" \
-    "pretrained=meta-llama/Llama-3.2-3B-Instruct,lora_local_path=${CKPT_DIR}/llama3.2-3B-Instruct#amid/ab_pr_0.5_0.5_4_1e-4/7476,tensor_parallel_size=${TP},dtype=float16,gpu_memory_utilization=0.85,trust_remote_code=True"
+# run_eval \
+#     "llama3.2-3B-Instruct#amid-ab_pr_0.5_0.5_4_1e-4-7476" \
+#     "pretrained=meta-llama/Llama-3.2-3B-Instruct,lora_local_path=${CKPT_DIR}/llama3.2-3B-Instruct#amid/ab_pr_0.5_0.5_4_1e-4/7476,tensor_parallel_size=${TP},dtype=float16,gpu_memory_utilization=0.85,trust_remote_code=True"
 
-run_eval \
-    "qwen2.5-0.5B#amid-ab_pr_0.5_0.5_8_1e-4-7476" \
-    "pretrained=Qwen/Qwen2.5-1.5B,lora_local_path=${CKPT_DIR}/qwen2.5-1.5B-Instruct#amid/ab_pr_0.5_0.5_4_1e-4/7476,tensor_parallel_size=${TP},dtype=float16,gpu_memory_utilization=0.85,trust_remote_code=True"
+# run_eval \
+#     "qwen2.5-0.5B#amid-ab_pr_0.5_0.5_8_1e-4-7476" \
+#     "pretrained=Qwen/Qwen2.5-1.5B,lora_local_path=${CKPT_DIR}/qwen2.5-1.5B-Instruct#amid/ab_pr_0.5_0.5_4_1e-4/7476,tensor_parallel_size=${TP},dtype=float16,gpu_memory_utilization=0.85,trust_remote_code=True"
 
 run_eval \
     "qwen2.5-14B-Instruct" \
