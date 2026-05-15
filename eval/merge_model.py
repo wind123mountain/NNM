@@ -54,9 +54,11 @@ def main():
     else:
         adapter_weights = torch.load(adapter_bin, map_location="cpu")
 
-    vocab_size = adapter_weights[
-        "base_model.model.model.embed_tokens.weight"
-    ].shape[0]
+    vocab_size = -1
+    if 'model.embed_tokens.weight' in adapter_weights:
+        vocab_size = adapter_weights['model.embed_tokens.weight'].shape[0]
+    elif 'base_model.model.model.embed_tokens.weight' in adapter_weights:
+        vocab_size = adapter_weights["base_model.model.model.embed_tokens.weight"].shape[0]
 
     print(f"Detected vocab size from adapter: {vocab_size}")
 
@@ -66,7 +68,8 @@ def main():
         trust_remote_code=True,
     )
 
-    base_model.resize_token_embeddings(vocab_size)
+    if vocab_size > 0:
+        base_model.resize_token_embeddings(vocab_size)
 
     print(f"Loading adapter: {args.adapter}")
 

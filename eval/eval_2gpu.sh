@@ -86,10 +86,10 @@ run_eval() {
 #   --adapter outputs/llama-3.2-3B-it-sft/checkpoint-1911 \
 #   --output outputs/llama-3.2-3B-it-sft/checkpoint-1911
 
-# python eval/merge_model.py \
-#   --base_model meta-llama/Llama-3.2-3B-Instruct \
-#   --adapter outputs/llama-3.2-3B-it-nnm-1epoch/checkpoint-2492 \
-#   --output outputs/llama-3.2-3B-it-nnm-1epoch/checkpoint-2492
+python eval/merge_model.py \
+  --base_model meta-llama/Llama-3.2-3B-Instruct \
+  --adapter outputs/v2/llama-3.2-3B-it-nnm-concatenated/checkpoint-2492 \
+  --output outputs/v2/llama-3.2-3B-it-nnm-concatenated/checkpoint-2492
 
 # run_eval \
 #     "llama-3.2-3B-it-sft-checkpoint-1911" \

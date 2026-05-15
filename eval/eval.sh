@@ -15,14 +15,14 @@ set -e
 # ============================================================
 # Config
 # ============================================================
-MODEL_NAME="/home/hungpv/projects/NND/outputs/qwen2.5-math-distillm-nonnm/checkpoint-2492"
+MODEL_NAME="/home/hungpv/projects/NND/outputs/qwen2.5-math-nnm-chosenv2/checkpoint-2492"
 # SUBFOLDER="checkpoint-1140"   # nếu model huggingface có subfolder chứa pytorch_model.bin, set tên subfolder này; nếu không có subfolder, set SUBFOLDER="" (empty string)
 #MODEL_NAME="Qwen/Qwen2.5-Math-1.5B-Instruct"
-TOKENIZER="/home/hungpv/projects/NND/outputs/qwen2.5-math-distillm-nonnm/checkpoint-2492"   # nếu tokenizer cùng tên với model, set giống MODEL_NAME; nếu tokenizer khác tên hoặc có subfolder khác, set tên/tokenizer path ở đây
-DEVICE="cuda"
+TOKENIZER="/home/hungpv/projects/NND/outputs/qwen2.5-math-nnm-chosenv2/checkpoint-2492"   # nếu tokenizer cùng tên với model, set giống MODEL_NAME; nếu tokenizer khác tên hoặc có subfolder khác, set tên/tokenizer path ở đây
+DEVICE="cuda: 0"
 DTYPE="bfloat16"
 BATCH="8"           # 'auto' để lm-eval tự chỉnh; hoặc set 32, 16, ...
-OUT_DIR="/eval_results/distillm2-nnm-only-distillm2"
+OUT_DIR="./eval_results/distillm2-nnm-only-distillm2"
 INCLUDE_PATH="$(pwd)/custom_tasks"   # nơi chứa gsm_plus.yaml
 
 # Common args
