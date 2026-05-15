@@ -3,7 +3,7 @@
 CKPT_DIR="./ckpts"
 
 
-TP=4
+TP=${1:-2}
 
 LOG_DIR="outputs/eval_results/logs"
 OUT_DIR="outputs/eval_results/vllm"
