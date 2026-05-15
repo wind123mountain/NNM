@@ -1,8 +1,5 @@
 #!/bin/bash
 
-#!/bin/bash
-set -e  # Dừng script nếu có lệnh nào lỗi
-
 CONFIG_FILE="accelerate_configs/multi_gpu.yaml"
 SCRIPT="src/run_nnm_distillm_math.py"
 CONFIG_DIR="./training_configs/qwen2.5-0.5B"
