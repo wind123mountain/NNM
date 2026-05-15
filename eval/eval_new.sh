@@ -29,9 +29,6 @@ run_eval() {
         --include_path "${INCLUDE_PATH}"
         --log_samples
         --output_path "${OUT}"
-        --max_new_tokens 2048          # Tăng cho reasoning + code
-        --temperature 0.6
-        --top_p 0.95
     )
 
     {
