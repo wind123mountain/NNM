@@ -7,6 +7,9 @@ Metric: pass@1 / accuracy
 Usage:
     python eval_vllm.py --model <path_or_hf_id> [--tasks gsm8k,math500,mbpp,sciq,mmlu_stem]
                         [--output_dir ./eval_results] [--max_tokens 1024] [--tensor_parallel 1]
+
+    python eval_vllm.py --model <path_or_hf_id> 
+                        [--output_dir ./eval_results] [--max_tokens 1024] [--tensor_parallel 1]
 """
 
 import argparse, json, os, re, sys, time, subprocess, tempfile, traceback

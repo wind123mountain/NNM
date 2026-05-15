@@ -101,8 +101,8 @@ python eval/merge_model.py \
 
 python eval/merge_model.py \
   --base_model Qwen/Qwen2.5-1.5B-Instruct \
-  --adapter outputs/qwen2.5-1.5B-it-nnm-1epoch/checkpoint-2492 \
-  --output outputs/qwen2.5-1.5B-it-nnm-1epoch/checkpoint-2492
+  --adapter outputs/v2/qwen2.5-1.5B-it-nnm-concatenated/checkpoint-2492 \
+  --output outputs/v2/qwen2.5-1.5B-it-nnm-concatenated/checkpoint-2492
 
 run_eval \
     "qwen2.5-1.5B-it-sft-checkpoint-2492" \

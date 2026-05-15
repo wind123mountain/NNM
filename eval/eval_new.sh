@@ -3,7 +3,7 @@
 CKPT_DIR="./ckpts"
 
 
-TP=2
+TP=4
 
 LOG_DIR="outputs/eval_results/logs"
 OUT_DIR="outputs/eval_results/vllm"
@@ -60,12 +60,12 @@ run_eval() {
     echo "[$(date '+%Y-%m-%d %H:%M:%S')] === Xong: ${LABEL} ==="
 }
 
-run_eval \
-    "qwen2.5-1.5B-it-sft-checkpoint-2492" \
-    "pretrained=outputs/qwen2.5-math-nnm-concatenated/checkpoint-2492,tensor_parallel_size=${TP},dtype=float16,gpu_memory_utilization=0.85,trust_remote_code=True"
+HF_ALLOW_CODE_EVAL=1 run_eval \
+    "llama-3.2-3B-it-nnm-concatenated-v2-checkpoint-2492" \
+    "pretrained=outputs/v2/llama-3.2-3B-it-nnm-concatenated/checkpoint-2492,tensor_parallel_size=${TP},dtype=float16,gpu_memory_utilization=0.85,trust_remote_code=True"
 
-run_eval \
-    "qwen2.5-1.5B-it-sft-checkpoint-2492" \
-    "pretrained=outputs/qwen2.5-math-nnm-concatenated-001/checkpoint-2492,tensor_parallel_size=${TP},dtype=float16,gpu_memory_utilization=0.85,trust_remote_code=True"
+HF_ALLOW_CODE_EVAL=1 run_eval \
+    "qwen2.5-1.5B-it-nnm-concatenated-v2-checkpoint-2492" \
+    "pretrained=outputs/v2/qwen2.5-1.5B-it-nnm-concatenated/checkpoint-2492,tensor_parallel_size=${TP},dtype=float16,gpu_memory_utilization=0.85,trust_remote_code=True"
 
 echo "=== Done ==="
