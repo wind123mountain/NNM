@@ -29,7 +29,7 @@ preprocessing_num_workers: 12
 bf16: true
 do_eval: true
 eval_steps: 10000000
-gradient_accumulation_steps: 16
+gradient_accumulation_steps: 8
 hub_model_id: llama
 learning_rate: 5.0e-5
 log_level: info
@@ -41,7 +41,7 @@ num_train_epochs: 1
 optim: adamw_torch
 output_dir: ./outputs/llama-3.2-3B-it-nnm-concatenated
 run_name: llama-3.2-3B-it-nnm
-per_device_train_batch_size: 1
+per_device_train_batch_size: 2
 per_device_eval_batch_size: 2
 push_to_hub: false
 # save_strategy: "steps"

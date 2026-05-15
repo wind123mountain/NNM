@@ -1,12 +1,6 @@
 #!/bin/bash
 
-cd llm-evaluation-harness
-pip install -e ".[math,ifeval,sentencepiece]"
-pip install langdetect immutabledict   # cho IFEval
-cd ..
-
 CKPT_DIR="./ckpts"
-INCLUDE_PATH="custom_tasks/"
 
 hf download VoCuc/nnm --include "qwen2.5-1.5B-it-sft/checkpoint-1149/*" \
         --local-dir "${CKPT_DIR}"
@@ -35,10 +29,8 @@ hf download VoCuc/AMiD --include "qwen2.5-0.5B#amid/ab_pr_0.5_0.5_8_1e-4/7476/*"
 
 TP=4
 
-VENV="./.venv/bin"
-LM_EVAL="lm_eval"
-LOG_DIR="logs/eval"
-OUT_DIR="results/vllm"
+LOG_DIR="outputs/eval_results/logs"
+OUT_DIR="outputs/eval_results/vllm"
 mkdir -p "${LOG_DIR}" "${OUT_DIR}"
 
 
@@ -50,47 +42,46 @@ run_eval() {
 
     mkdir -p "${OUT}"
 
-    echo ""
     echo "[$(date '+%Y-%m-%d %H:%M:%S')] === Bắt đầu: ${LABEL} ==="
 
     BASE_ARGS=(
         --model vllm
         --model_args "${MODEL_ARGS}"
-        --batch_size 1
+        --batch_size auto
         --apply_chat_template
         --fewshot_as_multiturn
         --include_path "${INCLUDE_PATH}"
         --log_samples
         --output_path "${OUT}"
+        --max_new_tokens 2048          # Tăng cho reasoning + code
+        --temperature 0.6
+        --top_p 0.95
     )
 
     {
         echo "=========================================="
         echo "Label: ${LABEL}"
-        echo "Args : ${MODEL_ARGS}"
         echo "Start: $(date)"
         echo "=========================================="
 
-        echo ">>> [1/10] GSM8K"
-        "${LM_EVAL}" "${BASE_ARGS[@]}" --tasks gsm8k --num_fewshot 5
+        echo ">>> [1/10] GSM8K (CoT)"
+        lm_eval "${BASE_ARGS[@]}" --tasks gsm8k_cot --num_fewshot 5
 
-        echo ">>> [3/10] MATH Minerva"
-        "${LM_EVAL}" "${BASE_ARGS[@]}" --tasks minerva_math500 --num_fewshot 4
+        echo ">>> [2/10] MATH500 (tốt nhất)"
+        lm_eval "${BASE_ARGS[@]}" --tasks hendrycks_math500 --num_fewshot 4
 
-        echo ">>> [5/10] MMLU-STEM"
-        "${LM_EVAL}" "${BASE_ARGS[@]}" --tasks mmlu_stem --num_fewshot 5
+        echo ">>> [3/10] MMLU-STEM"
+        lm_eval "${BASE_ARGS[@]}" --tasks mmlu_stem --num_fewshot 5
 
-        echo ">>> [6/10] SciQ"
-        "${LM_EVAL}" "${BASE_ARGS[@]}" --tasks sciq --num_fewshot 0
+        echo ">>> [4/10] SciQ"
+        lm_eval "${BASE_ARGS[@]}" --tasks sciq --num_fewshot 0
 
-        echo ">>> [7/10] MBPP"
-        "${LM_EVAL}" "${BASE_ARGS[@]}" --tasks mbpp --num_fewshot 3 --confirm_run_unsafe_code
-
+        echo ">>> [5/10] MBPP"
+        lm_eval "${BASE_ARGS[@]}" --tasks mbpp --num_fewshot 3 --confirm_run_unsafe_code
 
         echo "=========================================="
         echo "DONE: ${LABEL} | $(date)"
         echo "=========================================="
-
     } 2>&1 | tee "${LOG}"
 
     echo "[$(date '+%Y-%m-%d %H:%M:%S')] === Xong: ${LABEL} ==="
@@ -128,14 +119,6 @@ run_eval \
 run_eval \
     "qwen2.5-0.5B#amid-ab_pr_0.5_0.5_8_1e-4-7476" \
     "pretrained=${CKPT_DIR}/qwen2.5-0.5B#amid/ab_pr_0.5_0.5_8_1e-4/7476,tensor_parallel_size=${TP},dtype=float16,gpu_memory_utilization=0.85,trust_remote_code=True"
-
-# run_eval \
-#     "llama3.2-3B-Instruct#amid-ab_pr_0.5_0.5_4_1e-4-7476" \
-#     "pretrained=meta-llama/Llama-3.2-3B-Instruct,lora_local_path=${CKPT_DIR}/llama3.2-3B-Instruct#amid/ab_pr_0.5_0.5_4_1e-4/7476,tensor_parallel_size=${TP},dtype=float16,gpu_memory_utilization=0.85,trust_remote_code=True"
-
-# run_eval \
-#     "qwen2.5-0.5B#amid-ab_pr_0.5_0.5_8_1e-4-7476" \
-#     "pretrained=Qwen/Qwen2.5-1.5B,lora_local_path=${CKPT_DIR}/qwen2.5-1.5B-Instruct#amid/ab_pr_0.5_0.5_4_1e-4/7476,tensor_parallel_size=${TP},dtype=float16,gpu_memory_utilization=0.85,trust_remote_code=True"
 
 run_eval \
     "qwen2.5-14B-Instruct" \

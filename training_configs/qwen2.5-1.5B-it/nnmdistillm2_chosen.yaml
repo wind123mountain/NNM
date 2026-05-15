@@ -60,7 +60,8 @@ nnm_lambda: 0.01
 nnm_K_centroids: 128
 nnm_d_prime: 256
 nnm_ns_iters: 5
-nnm_warmup: 400
+nnm_delay: 200      # steps đầu nnm_loss = 0
+nnm_warmup: 200
 nnm_n_mid_layers: 4
 nnm_chosen_weight: 1.0
 nnm_rejected_weight: 1.0
