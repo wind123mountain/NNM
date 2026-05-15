@@ -519,7 +519,7 @@ class DistiLLMTrainer(Trainer):
         self.loss_type = args.loss_type
         self.base_alpha_1, self.base_alpha_2 = 0.1, 0.1
         self.update_alpha = False
-        self.gradual_beta = False
+        self.gradual_beta = True
         self.logp_logq, self.logq_logp = None, None
 
         self._stored_metrics = defaultdict(lambda: defaultdict(list))
@@ -1275,10 +1275,10 @@ class DistiLLMTrainer(Trainer):
 
         elif self.loss_type == "distillm_v2":
             if self.gradual_beta:
-                beta = 1.0 + 0.5 * min(1., 2 * self.state.global_step / self.state.max_steps)
+                beta = min(0.0, 1.75 * self.state.global_step / self.state.max_steps)
             else:
                 beta = 1.0
-            losses = ((2-beta)*chosen_position_kl+beta*rejected_position_kl).to(self.accelerator.device)
+            losses = ((2-beta)*chosen_position_kl + beta*rejected_position_kl).to(self.accelerator.device)
 
         elif self.loss_type == "gkd":
             chosen_position_kl = chosen_position_kl.to(self.accelerator.device)
