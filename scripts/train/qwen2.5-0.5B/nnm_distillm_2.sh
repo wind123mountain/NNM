@@ -12,14 +12,14 @@ CONFIG_DIR="./training_configs/qwen2.5-0.5B"
 
 # Run 2: concatenated_001
 accelerate launch \
-  --config_file "$CONFIG_FILE" \
-  "$SCRIPT" \
-  "$CONFIG_DIR/nnmdistillm2_concatenated_001.yaml"
+  --config_file accelerate_configs/multi_gpu.yaml \
+  src/run_nnm_distillm_math.py \
+  ./training_configs/qwen2.5-0.5B/nnmdistillm2_concatenated_001.yaml
 
 # Run 3: concatenated
 accelerate launch \
-  --config_file "$CONFIG_FILE" \
-  "$SCRIPT" \
-  "$CONFIG_DIR/nnmdistillm2_concatenated.yaml"
+  --config_file accelerate_configs/multi_gpu.yaml \
+  src/run_nnm_distillm_math.py \
+  ./training_configs/qwen2.5-0.5B/nnmdistillm2_concatenated.yaml
 
 echo "All training runs completed successfully!"
